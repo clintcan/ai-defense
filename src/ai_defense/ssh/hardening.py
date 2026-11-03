@@ -22,6 +22,7 @@ class PrimitiveKind(str, Enum):
     CONFIG_EDIT = "config_edit"
     KERNEL_MODULE = "kernel_module"
     SERVICE = "service"
+    FIREWALL_RULE = "firewall_rule"
 
 
 # --- config edits --------------------------------------------------------
@@ -105,6 +106,57 @@ class ServiceChange:
         """Disabling/masking/stopping a protective service is never allowed."""
         disabling = self.action in (ServiceAction.DISABLE, ServiceAction.MASK, ServiceAction.STOP)
         return disabling and self.unit in PROTECTED_SERVICES
+
+
+# --- firewall rules ------------------------------------------------------
+#
+# Hardening frequently means *editing firewall rules* (close a port, restrict a
+# source, add a CVE mitigation rule) -- distinct from disabling the firewall,
+# which the PROTECTED_SERVICES guard forbids. Rule edits go through this managed
+# primitive via the firewall's own tooling (firewalld/ufw/nft), never raw
+# packet-filter string edits.
+
+class FirewallAction(str, Enum):
+    ALLOW = "allow"
+    DENY = "deny"
+    RESTRICT_SOURCE = "restrict_source"   # allow only from given CIDRs
+    REMOVE_RULE = "remove_rule"
+
+
+@dataclass(frozen=True)
+class FirewallChange:
+    action: FirewallAction
+    port: int | None = None
+    proto: str = "tcp"
+    sources: tuple[str, ...] = ()         # CIDRs for allow/restrict
+    zone: str | None = None
+    reason: str = ""
+    cve_ref: str | None = None
+
+    def locks_out_management(self, mgmt_port: int, mgmt_sources: tuple[str, ...]) -> bool:
+        """Lockout guard: a rule that would cut the harness's own SSH/management
+        access is refused. Belt-and-braces with the timed auto-revert below.
+        """
+        if self.action in (FirewallAction.DENY, FirewallAction.REMOVE_RULE):
+            if self.port == mgmt_port:
+                return True
+        if self.action == FirewallAction.RESTRICT_SOURCE and self.port == mgmt_port:
+            # restricting the mgmt port must still include our management sources
+            return not set(mgmt_sources).issubset(set(self.sources))
+        return False
+
+
+@dataclass(frozen=True)
+class TimedApply:
+    """Apply firewall/network changes with an auto-revert if not confirmed.
+
+    The executor schedules a rollback after ``revert_after_seconds``; a post-apply
+    health check (management SSH still reachable, canaries healthy) must confirm
+    within the window or the change is automatically rolled back. Prevents a bad
+    hardening rule from permanently severing access.
+    """
+
+    revert_after_seconds: int = 120
 
 
 # --- rollback ------------------------------------------------------------

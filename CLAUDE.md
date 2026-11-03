@@ -173,7 +173,10 @@ command *that would run*, never the secrets behind it.
     (e.g. `dccp`, `sctp`, `usb-storage`), or load a hardening module.
   - **Service state changes** — `disable`/`mask` an unneeded or vulnerable
     service; enable a protective one.
-  - WAF/firewall rules, access restrictions, feature disables.
+  - **Firewall rule edits** — tighten/harden by closing a port, restricting a
+    source, or adding a CVE mitigation rule (distinct from *disabling* the
+    firewall, which is blocked). WAF rules, access restrictions, feature
+    disables.
   These go through **managed, idempotent primitives** (below), never free-form
   edits, and are subject to the same denylist, dry-run, approval, canary, and
   rollback rules as any other change.
@@ -196,8 +199,17 @@ back:
   (`auditd`, `firewalld`, `ufw`, …) can never be disabled/masked, even with
   approval. Disabling a *vulnerable or unneeded* service is allowed; disabling a
   *protective* one is not.
+- **Firewall rules**: managed via the firewall's own tooling
+  (`firewalld`/`ufw`/`nft`), never raw packet-filter string edits. Editing rules
+  to harden is allowed; *disabling* the firewall service is not (see protected
+  services). Two extra safeguards apply to firewall/network changes: a **lockout
+  guard** refuses any rule that would cut the harness's own SSH/management access,
+  and a **timed auto-revert** applies the change, then rolls it back automatically
+  unless a post-apply health check (management reachable, canaries healthy)
+  confirms within the window — so a bad rule can't permanently sever access.
 - Every such primitive records a **rollback action** (restore the backed-up
-  file, re-enable the service, remove the blacklist drop-in) in the audit log.
+  file, re-enable the service, remove the blacklist drop-in, delete the firewall
+  rule) in the audit log.
 - Every proposed action cites its source advisory and is **verifiable by a human
   against the official advisory** before approval. The planner never invents a
   fix; if it can't cite a vendor/advisory source, it escalates instead.

@@ -3,6 +3,7 @@
 The vault and inspector are tested directly; the paramiko transport is tested by
 injecting a fake ``paramiko`` module (no real SSH server/network)."""
 
+import subprocess
 import sys
 import types
 
@@ -162,10 +163,30 @@ def test_paramiko_transport_allow_unknown_uses_autoadd(monkeypatch):
     assert _FakeSSHClient.last["policy"] == "AutoAddPolicy"
 
 
-def test_putty_ppk_key_gives_helpful_error(monkeypatch):
-    monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
-    from ai_defense.ssh.paramiko_transport import ParamikoTransport
+_PPK_BODY = "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n..."
 
-    ppk = "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n..."
+
+def test_putty_ppk_without_puttygen_gives_helpful_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
+    import ai_defense.ssh.paramiko_transport as pt
+    monkeypatch.setattr(pt.shutil, "which", lambda _n: None)   # puttygen absent
     with pytest.raises(ValueError, match="puttygen"):
-        ParamikoTransport().run("h", ["true"], key=ppk, timeout=5)
+        pt.ParamikoTransport().run("h", ["true"], key=_PPK_BODY, timeout=5)
+
+
+def test_putty_ppk_auto_converted_when_puttygen_present(monkeypatch):
+    monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
+    import ai_defense.ssh.paramiko_transport as pt
+    monkeypatch.setattr(pt.shutil, "which", lambda _n: "/usr/bin/puttygen")
+
+    # fake puttygen: writes an OpenSSH key to the -o output path, returns rc 0
+    def fake_run(cmd, capture_output=True, text=True, timeout=None):
+        out_path = cmd[cmd.index("-o") + 1]
+        with open(out_path, "w") as f:
+            f.write("-----BEGIN OPENSSH PRIVATE KEY-----\nconverted\n-----END-----\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(pt.subprocess, "run", fake_run)
+
+    out = pt.ParamikoTransport().run("h", ["true"], key=_PPK_BODY, timeout=5)
+    assert out.exit_code == 0            # converted key loaded + command ran

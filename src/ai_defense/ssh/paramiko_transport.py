@@ -11,20 +11,69 @@ to accept unknown hosts (trust-on-first-use) only when you understand the risk.
 from __future__ import annotations
 
 import io
+import os
 import shlex
+import shutil
+import subprocess
+import tempfile
 
 from .executor import CommandOutput
+
+_PPK_HEADER = "PuTTY-User-Key-File"
+_PPK_HELP = (
+    "PuTTY .ppk key detected but 'puttygen' is not on PATH to convert it. "
+    "Either install PuTTY (puttygen), or convert the key once: "
+    "`puttygen mykey.ppk -O private-openssh -o <keydir>/ssh-key/<name>`."
+)
+
+
+def _convert_ppk(key_text: str, passphrase: str | None) -> str:
+    """Convert a PuTTY .ppk to an OpenSSH private key using puttygen on PATH.
+
+    puttygen needs file paths, so the key is written to a private temp file,
+    converted, read back, and both temp files are removed immediately."""
+    puttygen = shutil.which("puttygen")
+    if not puttygen:
+        raise ValueError(_PPK_HELP)
+
+    in_fd, in_path = tempfile.mkstemp(suffix=".ppk")
+    out_path = in_path + ".openssh"
+    pass_path = None
+    try:
+        with os.fdopen(in_fd, "w") as f:
+            f.write(key_text)
+        try:
+            os.chmod(in_path, 0o600)
+        except OSError:
+            pass
+        cmd = [puttygen, in_path, "-O", "private-openssh", "-o", out_path]
+        if passphrase:
+            pass_fd, pass_path = tempfile.mkstemp()
+            with os.fdopen(pass_fd, "w") as pf:
+                pf.write(passphrase)
+            cmd += ["--old-passphrase", pass_path]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0 or not os.path.exists(out_path):
+            raise ValueError(f"puttygen conversion failed: {proc.stderr.strip()}")
+        with open(out_path) as f:
+            return f.read()
+    finally:
+        for p in (in_path, out_path, pass_path):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 
 def _load_key(key_text: str, passphrase: str | None):
     import paramiko
 
-    # PuTTY .ppk is not an OpenSSH key; paramiko can't load it. Give a clear fix.
-    if key_text.lstrip().startswith("PuTTY-User-Key-File"):
-        raise ValueError(
-            "PuTTY .ppk key detected; paramiko needs an OpenSSH key. Convert it: "
-            "`puttygen mykey.ppk -O private-openssh -o <keydir>/ssh-key/<name>` "
-            "(or PuTTYgen GUI: Conversions -> Export OpenSSH key).")
+    # PuTTY .ppk is not an OpenSSH key; auto-convert it with puttygen if present
+    # (otherwise _convert_ppk raises a clear "install puttygen / convert" error).
+    if key_text.lstrip().startswith(_PPK_HEADER):
+        key_text = _convert_ppk(key_text, passphrase)
+        passphrase = None          # the converted OpenSSH key is unencrypted
 
     # Try the common key types; paramiko has no single auto-detect loader.
     for cls in (getattr(paramiko, n) for n in

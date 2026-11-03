@@ -10,10 +10,12 @@ from ai_defense.cloud.aws import AwsAdapter
 from ai_defense.cloud.tools import (
     EC2_DISCOVERY_TOOL,
     LIGHTSAIL_DISCOVERY_TOOL,
+    PATCH_BASELINE_TOOL,
     PATCH_STATE_TOOL,
     SNAPSHOT_TOOL,
     make_ec2_discovery_tool,
     make_lightsail_discovery_tool,
+    make_patch_baseline_tool,
     make_patch_state_tool,
     make_snapshot_tool,
 )
@@ -80,6 +82,10 @@ class FakeAwsClient:
         self.calls.append(("create_lightsail_snapshot", instance_name, snapshot_name))
         return {"operations": [{"status": "Started"}]}
 
+    def send_patch_command(self, instance_ids, operation, baseline_id=None):
+        self.calls.append(("send_patch_command", tuple(instance_ids), operation, baseline_id))
+        return {"command_id": f"cmd-{operation.lower()}", "status": "Pending"}
+
     def describe_instance_patch_states(self, instance_ids):
         self.calls.append(("describe_instance_patch_states", instance_ids))
         return [
@@ -138,12 +144,6 @@ def test_blast_radius_zero_for_readonly():
     adapter = AwsAdapter(FakeAwsClient())
     assert adapter.blast_radius("list_instances", {}) == 0
     assert adapter.blast_radius("apply_patch_baseline", {"instance_ids": ["a", "b"]}) == 2
-
-
-def test_write_ops_not_implemented_in_this_slice():
-    adapter = AwsAdapter(FakeAwsClient())
-    with pytest.raises(NotImplementedError):
-        adapter.apply_patch_baseline(["i-001"], "pb-1")
 
 
 # --- protective snapshot ------------------------------------------------
@@ -297,3 +297,85 @@ def test_snapshot_tool_cannot_be_mislabeled_as_mutating():
     )
     res = disp.dispatch(intent)
     assert not res.ok and "may not run under action class" in res.summary
+
+
+# --- apply_patch_baseline (write) ---------------------------------------
+
+def test_patch_baseline_scans_before_install():
+    client = FakeAwsClient()
+    rec = AwsAdapter(client).apply_patch_baseline(["i-001", "i-002"], "pb-9")
+    ops = [c for c in client.calls if c[0] == "send_patch_command"]
+    assert ops[0][2] == "Scan" and ops[1][2] == "Install"       # scan first
+    assert rec["command_id"] == "cmd-install"
+    assert rec["scan_command_id"] == "cmd-scan"
+    assert rec["instance_ids"] == ["i-001", "i-002"]
+    assert "snapshot" in rec["rollback"]
+
+
+def test_patch_baseline_scan_first_false_skips_scan():
+    client = FakeAwsClient()
+    AwsAdapter(client).apply_patch_baseline(["i-001"], None, scan_first=False)
+    ops = [c for c in client.calls if c[0] == "send_patch_command"]
+    assert len(ops) == 1 and ops[0][2] == "Install"
+
+
+def test_patch_baseline_empty_raises():
+    with pytest.raises(ValueError, match="at least one instance"):
+        AwsAdapter(FakeAwsClient()).apply_patch_baseline([])
+
+
+def _patch_dispatcher(policy_cfg):
+    fake = FakeAwsClient()
+    reg = ToolRegistry()
+    reg.register(make_patch_baseline_tool(lambda creds: fake))
+    assets = AssetRegistry()
+    auth = Authorization("sig", "lead", NOW - timedelta(days=1), NOW + timedelta(days=30))
+    for iid in ["i-001", "i-002", "i-003", "i-004"]:
+        assets.register(Asset(iid, "ec2-instance", "team", "web-prod", auth))
+    approvals = ApprovalGate()
+    disp = Dispatcher(
+        registry=reg, policy=PolicyEngine(policy_cfg), assets=assets,
+        approvals=approvals, vault=Vault(_Backend()), audit=AuditLog(clock=lambda: NOW),
+        clock=lambda: NOW,
+    )
+    return disp, approvals, fake
+
+
+def test_patch_baseline_pending_then_applied():
+    disp, approvals, fake = _patch_dispatcher({
+        "blast_radius_caps": {"patch_canary": 3},
+        "approvals": {"patch_canary": {"required": 1}},
+    })
+    intent = Intent(
+        tool=PATCH_BASELINE_TOOL,
+        params={"instance_ids": ["i-001", "i-002"], "credential_ref": "aws/patch-role",
+                "baseline": "pb-9"},
+        targets=["i-001", "i-002"], action_class=ActionClass.PATCH_CANARY,
+        reason="CVE-2026-9",
+    )
+    pending = disp.dispatch(intent)
+    assert not pending.ok and pending.data["approval_state"] == "pending"
+    assert pending.data["blast_radius"] == 2                     # instance count
+    assert not any(c[0] == "send_patch_command" for c in fake.calls)
+
+    approvals.decide(pending.data["change_set_id"], "lead", approve=True, now=NOW)
+    res = disp.dispatch(intent)
+    assert res.ok
+    assert res.data["command_id"] == "cmd-install"
+
+
+def test_patch_baseline_blast_radius_cap_denies():
+    disp, approvals, fake = _patch_dispatcher({
+        "blast_radius_caps": {"patch_canary": 3},
+        "approvals": {"patch_canary": {"required": 1}},
+    })
+    intent = Intent(
+        tool=PATCH_BASELINE_TOOL,
+        params={"instance_ids": ["i-001", "i-002", "i-003", "i-004"],
+                "credential_ref": "aws/patch-role"},
+        targets=["i-001", "i-002", "i-003", "i-004"],
+        action_class=ActionClass.PATCH_CANARY, reason="x",
+    )
+    res = disp.dispatch(intent)
+    assert not res.ok and "blast radius" in res.data["reason"]
+    assert not any(c[0] == "send_patch_command" for c in fake.calls)

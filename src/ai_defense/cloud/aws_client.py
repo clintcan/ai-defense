@@ -58,6 +58,13 @@ class AwsClient(Protocol):
     def delete_lightsail_snapshot(self, snapshot_name: str) -> dict:
         """Delete a Lightsail instance snapshot."""
 
+    # --- write (patch) --------------------------------------------------
+
+    def send_patch_command(self, instance_ids: list[str], operation: str,
+                           baseline_id: str | None = None) -> dict:
+        """Run SSM AWS-RunPatchBaseline on instances. ``operation`` is "Scan"
+        (read-only) or "Install". Returns at least a command id + status."""
+
 
 def _base_session(boto3, credentials: dict[str, Any], region: str | None):
     """Build the base boto3 Session from the credential descriptor.
@@ -165,3 +172,15 @@ class Boto3AwsClient:
 
     def delete_lightsail_snapshot(self, snapshot_name) -> dict:
         return self._lightsail.delete_instance_snapshot(instanceSnapshotName=snapshot_name)
+
+    def send_patch_command(self, instance_ids, operation, baseline_id=None) -> dict:
+        params = {"Operation": [operation]}
+        if baseline_id:
+            params["BaselineOverride"] = [baseline_id]
+        resp = self._ssm.send_command(
+            DocumentName="AWS-RunPatchBaseline",
+            InstanceIds=instance_ids,
+            Parameters=params,
+        )
+        command = resp.get("Command", {})
+        return {"command_id": command.get("CommandId"), "status": command.get("Status")}

@@ -161,10 +161,37 @@ class AwsAdapter(CloudAdapter):
             deleted.append(sid)
         return {"service": service, "deleted_snapshot_ids": deleted}
 
-    # --- write (not in this slice) ---------------------------------------
+    # --- write (patch) ---------------------------------------------------
 
-    def apply_patch_baseline(self, instance_ids: list[str], baseline: str) -> dict:
-        raise NotImplementedError("apply_patch_baseline: write slice, not yet implemented")
+    def apply_patch_baseline(self, instance_ids: list[str], baseline: str | None = None,
+                             *, scan_first: bool = True) -> dict:
+        """Apply an SSM patch baseline to EC2 instances via AWS-RunPatchBaseline.
+
+        Mirrors the SSH executor's dry-run-first safety: an SSM **Scan**
+        (read-only, reports what's missing) runs before the **Install** unless
+        ``scan_first`` is False. Rollback is via the pre-change snapshot the
+        remediation workflow takes first (a baseline install is not trivially
+        reversible on its own)."""
+        if not instance_ids:
+            raise ValueError("apply_patch_baseline requires at least one instance")
+
+        scan_command_id = None
+        if scan_first:
+            scan = self._client.send_patch_command(instance_ids, "Scan", baseline)
+            scan_command_id = scan.get("command_id")
+
+        install = self._client.send_patch_command(instance_ids, "Install", baseline)
+        return {
+            "service": "ec2",
+            "operation": "Install",
+            "instance_ids": list(instance_ids),
+            "baseline": baseline,
+            "command_id": install.get("command_id"),
+            "status": install.get("status"),
+            "scan_command_id": scan_command_id,
+            "rollback": "restore affected instances from the pre-change snapshot(s) "
+                        "taken by the remediation workflow",
+        }
 
 
 def _isoformat(value) -> str | None:

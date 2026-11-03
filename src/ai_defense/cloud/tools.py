@@ -21,6 +21,7 @@ PATCH_STATE_TOOL = "aws.ssm.describe_patch_state"
 LIGHTSAIL_DISCOVERY_TOOL = "aws.lightsail.list_instances"
 SNAPSHOT_TOOL = "aws.snapshot_before_change"
 SNAPSHOT_DELETE_TOOL = "aws.delete_snapshots"
+PATCH_BASELINE_TOOL = "aws.ssm.apply_patch_baseline"
 
 ClientFactory = Callable[[dict], AwsClient]
 
@@ -117,6 +118,45 @@ def make_snapshot_tool(client_factory: ClientFactory) -> ToolSpec:
         },
         executor=_execute,
         capability=ToolCapability.PROTECTIVE,
+    )
+
+
+def make_patch_baseline_tool(client_factory: ClientFactory) -> ToolSpec:
+    """Apply an SSM patch baseline to EC2 instances (capability=MUTATING,
+    approval-gated). Scans before installing unless scan_first is False. The
+    blast radius is the number of target instances, surfaced to policy/approver."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        credentials = resolve_secret(params["credential_ref"])
+        adapter = AwsAdapter(client_factory(credentials))
+        record = adapter.apply_patch_baseline(
+            params["instance_ids"],
+            params.get("baseline"),
+            scan_first=params.get("scan_first", True),
+        )
+        return ToolResult(
+            ok=record.get("command_id") is not None, tool=PATCH_BASELINE_TOOL,
+            summary=f"patch baseline install dispatched to "
+                    f"{len(record['instance_ids'])} instance(s) "
+                    f"(command {record['command_id']})",
+            data=record,
+        )
+
+    return ToolSpec(
+        name=PATCH_BASELINE_TOOL,
+        schema={
+            "type": "object",
+            "required": ["instance_ids", "credential_ref"],
+            "properties": {
+                "instance_ids": {"type": "array"},
+                "baseline": {"type": "string"},
+                "scan_first": {"type": "boolean"},
+                "credential_ref": {"type": "string"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.MUTATING,
+        describe_blast_radius=lambda p: len(p.get("instance_ids", [])),
     )
 
 

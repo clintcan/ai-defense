@@ -72,10 +72,14 @@ Working vertical slice. Implemented and tested end to end:
   exposes a deliberate, approval-gated `CLEANUP` to delete the snapshot once the
   fix is confirmed stable.
 
-Still stubbed: AWS write op (`apply_patch_baseline`), other AWS services and
-cloud providers, and real advisory-feed / host-inspector / boto3 clients (the
-seams are in place; implementations are injected in tests). Run `pytest`
-(101 tests) and `ruff check src tests`.
+- **AWS SSM patch baseline (write)** — `apply_patch_baseline` runs
+  AWS-RunPatchBaseline, scanning (read-only) before installing, as a `MUTATING`
+  approval-gated tool whose blast radius is the target instance count.
+
+Still stubbed: other AWS services and cloud providers (GCP/Azure), and real
+advisory-feed / host-inspector / boto3 clients (the seams are in place;
+implementations are injected in tests). Run `pytest` (105 tests) and
+`ruff check src tests`.
 
 ## Dev
 

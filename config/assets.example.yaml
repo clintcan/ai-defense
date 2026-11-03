@@ -1,0 +1,23 @@
+# Example asset registry + authorization ledger.
+# Copy to assets.yaml (git-ignored). Only assets listed here can be targeted.
+
+assets:
+  - asset_id: web-prod-01
+    kind: ssh-host
+    owner: platform-team
+    environment: web-prod
+    authorization:
+      granted_by: secops-lead
+      granted_at: 2026-11-01T00:00:00Z
+      expires_at: 2027-11-01T00:00:00Z
+      attestation_sig: "REPLACE_WITH_SIGNATURE"
+
+  - asset_id: aws-acct-123456789012
+    kind: cloud-account
+    owner: platform-team
+    environment: web-prod
+    authorization:
+      granted_by: secops-lead
+      granted_at: 2026-11-01T00:00:00Z
+      expires_at: 2027-11-01T00:00:00Z
+      attestation_sig: "REPLACE_WITH_SIGNATURE"

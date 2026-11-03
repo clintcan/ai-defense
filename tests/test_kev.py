@@ -46,6 +46,17 @@ def test_enrich_marks_kev_listed_only():
     assert by_id["CVE-2026-2002"].kev is False      # not listed -> unchanged
 
 
+def test_enrich_matches_canonicalized_distro_cve():
+    # A distro OSV record whose id is UBUNTU-CVE-... is normalized to the plain
+    # CVE in _to_advisory, so KEV (keyed on CVE ids) now matches it.
+    from ai_defense.vuln.osv import _to_advisory
+    adv = _to_advisory({"id": "UBUNTU-CVE-2023-1523", "aliases": [],
+                        "affected": [{"package": {"name": "snapd"}}]})
+    feed = KevEnrichedFeed(StaticAdvisoryFeed([adv]),
+                           KevCatalog(FakeHttp(["CVE-2023-1523"])))
+    assert feed.fetch()[0].kev is True
+
+
 def test_enrich_passes_through_for_inventory():
     # the wrapper must preserve the query-by-inventory path of the inner feed
     class _Inner(StaticAdvisoryFeed):

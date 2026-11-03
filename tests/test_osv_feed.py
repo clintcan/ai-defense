@@ -62,6 +62,47 @@ def test_to_advisory_missing_id_is_none():
     assert _to_advisory({}) is None
 
 
+def test_to_advisory_canonicalizes_distro_cve_id():
+    # Ubuntu OSV records id-prefix the CVE and may not list it as a plain alias;
+    # the advisory must still key on the canonical CVE (so KEV/CVSS/dedupe match).
+    ubuntu = {"id": "UBUNTU-CVE-2023-1523", "aliases": ["USN-1234-1"],
+              "affected": [{"package": {"name": "snapd", "ecosystem": "Ubuntu:18.04:LTS"}}]}
+    assert _to_advisory(ubuntu).cve_id == "CVE-2023-1523"
+    assert _to_advisory(ubuntu).metadata["osv_id"] == "UBUNTU-CVE-2023-1523"
+    # a record with no CVE anywhere keeps its OSV id
+    assert _to_advisory({"id": "GHSA-xxxx"}).cve_id == "GHSA-xxxx"
+
+
+def test_for_inventory_dedupes_repeated_affected_entries():
+    # One OSV record listing the same package across several release pockets
+    # must yield a single finding, not one per pocket.
+    pockets = {
+        "id": "UBUNTU-CVE-2022-0001", "aliases": [],
+        "severity": [{"type": "CVSS_V3", "score": "7.5"}],
+        "affected": [
+            {"package": {"name": "openssl", "ecosystem": "Ubuntu:18.04:LTS"},
+             "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"},
+                                                         {"fixed": "1.1.1-1ubuntu2.1~18.04"}]}]},
+            {"package": {"name": "openssl", "ecosystem": "Ubuntu:18.04:LTS"},
+             "ranges": [{"type": "ECOSYSTEM", "events": [{"introduced": "0"},
+                                                         {"fixed": "1.1.1-1ubuntu2.1~18.04"}]}]},
+        ],
+    }
+
+    class _Http:
+        def post_json(self, url, body):
+            return {"results": [{"vulns": [{"id": "UBUNTU-CVE-2022-0001"}]}]}
+
+        def get_json(self, url):
+            return pockets
+
+    inv = [HostFindings("h1", {"openssl": "1.1.1"}, ecosystem="Ubuntu:18.04:LTS")]
+    advisories = OsvFeed(_Http()).for_inventory(inv)
+    findings = correlate(advisories, inv)
+    assert len(findings) == 1
+    assert findings[0].cve_id == "CVE-2022-0001"
+
+
 # --- query-by-inventory -------------------------------------------------
 
 def test_for_inventory_queries_only_present_packages():

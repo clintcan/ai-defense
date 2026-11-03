@@ -49,4 +49,21 @@ def correlate(advisories: list[Advisory], inventory: list[HostFindings]) -> list
     for advisory in advisories:
         for host in inventory:
             out.extend(correlate_one(advisory, host))
-    return out
+    return _dedupe(out)
+
+
+def _dedupe(findings: list[VulnFinding]) -> list[VulnFinding]:
+    """Collapse findings that describe the same vulnerability on the same host.
+
+    One advisory can list the same package across several release pockets, each
+    an ``affected`` entry, yielding duplicate ``(cve_id, asset_id, package)``
+    findings. Keep one per key, preferring a finding that carries a fixed version
+    (actionable as a patch) over one that does not. Insertion order is preserved
+    so callers that assert on ordering stay stable."""
+    best: dict[tuple[str, str, str], VulnFinding] = {}
+    for f in findings:
+        key = (f.cve_id, f.asset_id, f.package)
+        cur = best.get(key)
+        if cur is None or (f.patch_available and not cur.patch_available):
+            best[key] = f
+    return list(best.values())

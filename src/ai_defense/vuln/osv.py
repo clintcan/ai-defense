@@ -9,6 +9,7 @@ default ``UrllibHttpClient`` uses the standard library (no extra dependency).
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from datetime import datetime
 from typing import Any, Protocol
@@ -16,6 +17,8 @@ from typing import Any, Protocol
 from .feeds import Advisory, AdvisoryFeed, AffectedPackage
 
 OSV_BASE = "https://api.osv.dev"
+
+_CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
 
 
 class HttpClient(Protocol):
@@ -78,12 +81,30 @@ class OsvFeed(AdvisoryFeed):
         return list(advisories.values())
 
 
+def _canonical_cve(osv_id: str, aliases: list[str]) -> str:
+    """The canonical ``CVE-YYYY-N`` id for an OSV record, so KEV lookup, CVSS,
+    and finding de-duplication all key on the same identifier.
+
+    OSV distro feeds use their own ids (``UBUNTU-CVE-2023-1523``, ``USN-...``)
+    and carry the CVE as an alias or embedded in the id. Prefer an explicit CVE
+    alias, then a CVE embedded in the id, then one embedded in any alias; fall
+    back to the OSV id only when no CVE is present at all."""
+    for a in aliases:
+        if a.startswith("CVE-"):
+            return a
+    for candidate in (osv_id, *aliases):
+        m = _CVE_RE.search(candidate or "")
+        if m:
+            return m.group(0)
+    return osv_id
+
+
 def _to_advisory(detail: dict) -> Advisory | None:
     osv_id = detail.get("id")
     if not osv_id:
         return None
     aliases = detail.get("aliases", []) or []
-    cve_id = next((a for a in aliases if a.startswith("CVE-")), osv_id)
+    cve_id = _canonical_cve(osv_id, aliases)
 
     affected: list[AffectedPackage] = []
     for aff in detail.get("affected", []) or []:

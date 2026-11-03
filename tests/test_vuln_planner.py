@@ -52,6 +52,18 @@ def test_correlate_matches_only_vulnerable_hosts():
     assert findings[0].patch_available
 
 
+def test_correlate_dedupes_same_cve_package_and_prefers_patch():
+    # Same CVE lists openssl twice: once with no fix, once with a fixed version.
+    # Correlation must yield ONE finding and keep the actionable (patchable) one.
+    adv = Advisory("CVE-9", "osv", [
+        AffectedPackage("openssl"),                             # no fixed version
+        AffectedPackage("openssl", fixed_version="3.0.8"),      # patchable
+    ])
+    findings = correlate([adv], [HostFindings("h1", {"openssl": "3.0.5"})])
+    assert len(findings) == 1
+    assert findings[0].patch_available and findings[0].fixed_version == "3.0.8"
+
+
 # --- scanner ------------------------------------------------------------
 
 class _FakeInspector:

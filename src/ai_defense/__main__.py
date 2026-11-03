@@ -23,14 +23,23 @@ def _run_demo() -> int:
     return 0
 
 
+def _run_mcp() -> int:
+    from .mcp_server import serve
+    serve()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ai_defense", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("demo", help="run the local end-to-end demo")
+    sub.add_parser("mcp", help="run the MCP server over stdio (needs the 'mcp' extra)")
     args = parser.parse_args(argv)
 
     if args.command == "demo":
         return _run_demo()
+    if args.command == "mcp":
+        return _run_mcp()
     parser.error(f"unknown command: {args.command}")
     return 2
 

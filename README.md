@@ -108,6 +108,25 @@ authorization, the approval gate, rate limits, and redaction in action. The
 `composition.build_demo_engine()` wiring differs from production only in the
 backends it injects (simulated vault/SSH/AWS vs. real ones).
 
+## Chat / MCP
+
+Drive it from an MCP client (e.g. Claude Desktop/Code) in plain language:
+
+```bash
+pip install -e ".[mcp]"
+python -m ai_defense mcp            # MCP server over stdio
+```
+
+Tools exposed: `list_assets`, `scan`, `plan`, `remediate`, `approve_change`,
+`audit_tail`. Every call routes through the dispatcher, so the model proposes and
+the toolset enforces: a `remediate` returns *pending* with a `change_set_id`
+until a human calls `approve_change`, and the MCP client also prompts the human
+before any tool runs. Example client config:
+
+```json
+{ "mcpServers": { "ai-defense": { "command": "python", "args": ["-m", "ai_defense", "mcp"] } } }
+```
+
 ## Non-negotiables (enforced in code review)
 
 1. Only registered, authorized assets — never arbitrary/third-party systems.

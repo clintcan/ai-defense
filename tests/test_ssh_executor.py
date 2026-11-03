@@ -17,7 +17,7 @@ class FakeTransport:
         self.default = default
         self.calls = []          # list of (host, argv, key, timeout)
 
-    def run(self, host, argv, *, key, timeout):
+    def run(self, host, argv, *, key, timeout, user="root", port=22):
         self.calls.append((host, tuple(argv), key, timeout))
         return self.script.get(tuple(argv), self.default)
 

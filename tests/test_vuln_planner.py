@@ -70,7 +70,7 @@ def test_scanner_builds_findings():
 # --- planner ------------------------------------------------------------
 
 def _planner():
-    return RemediationPlanner(key_ref_for=lambda a: f"ssh-key/{a}")
+    return RemediationPlanner()
 
 
 def test_plan_patch_item_builds_dispatchable_intent():
@@ -81,7 +81,7 @@ def test_plan_patch_item_builds_dispatchable_intent():
     it = items[0]
     assert it.kind == RemediationKind.PATCH and not it.requires_human
     assert it.intent.tool == "patch.apply_security_update"
-    assert it.intent.params == {"host": "h1", "package": "openssl", "key_ref": "ssh-key/h1"}
+    assert it.intent.params == {"asset_id": "h1", "package": "openssl"}
     assert it.intent.action_class == ActionClass.PATCH_CANARY
     assert it.intent.source_ref == "CVE-1"
 

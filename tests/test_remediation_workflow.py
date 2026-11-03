@@ -5,10 +5,15 @@ from datetime import UTC, datetime, timedelta
 from ai_defense.approval.gate import ApprovalGate
 from ai_defense.audit.log import AuditLog
 from ai_defense.cloud.tools import make_snapshot_delete_tool, make_snapshot_tool
-from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
+from ai_defense.registry.assets import (
+    Asset,
+    AssetRegistry,
+    Authorization,
+    ConnectionInfo,
+)
 from ai_defense.scanner.scanner import HostFindings
 from ai_defense.ssh.executor import CommandOutput, SSHExecutor
-from ai_defense.ssh.tools import make_security_update_tool
+from ai_defense.ssh.tools import make_security_update_tool, registry_connection_resolver
 from ai_defense.toolset.dispatch import Dispatcher
 from ai_defense.toolset.policy import PolicyEngine
 from ai_defense.toolset.registry import ToolRegistry
@@ -44,7 +49,7 @@ class _SSHTransport:
     def __init__(self):
         self.calls = []
 
-    def run(self, host, argv, *, key, timeout):
+    def run(self, host, argv, *, key, timeout, user="root", port=22):
         self.calls.append(tuple(argv))
         return CommandOutput(0, "ok", "")
 
@@ -77,7 +82,7 @@ class _FakeCloud:
 def _patch_item():
     adv = Advisory("CVE-2026-1", "osv",
                    [AffectedPackage("openssl", fixed_version="3.0.8")], cvss=7.5)
-    planner = RemediationPlanner(key_ref_for=lambda a: f"ssh-key/{a}")
+    planner = RemediationPlanner()
     items = planner.plan([adv], [HostFindings("canary-01", {"openssl": "3.0.5"})])
     assert items[0].kind == RemediationKind.PATCH
     return items[0]
@@ -85,14 +90,17 @@ def _patch_item():
 
 def _build(cloud):
     transport = _SSHTransport()
-    reg = ToolRegistry()
-    reg.register(make_security_update_tool(SSHExecutor(transport)))
-    reg.register(make_snapshot_tool(lambda creds: cloud))
-    reg.register(make_snapshot_delete_tool(lambda creds: cloud))
     assets = AssetRegistry()
     assets.register(Asset("canary-01", "ec2-instance", "team", "web-prod",
                           Authorization("s", "l", NOW - timedelta(days=1),
-                                        NOW + timedelta(days=30))))
+                                        NOW + timedelta(days=30)),
+                          connection=ConnectionInfo(host="10.0.0.5",
+                                                    key_ref="ssh-key/canary-01")))
+    reg = ToolRegistry()
+    reg.register(make_security_update_tool(
+        SSHExecutor(transport), registry_connection_resolver(assets, clock=lambda: NOW)))
+    reg.register(make_snapshot_tool(lambda creds: cloud))
+    reg.register(make_snapshot_delete_tool(lambda creds: cloud))
     approvals = ApprovalGate()
     audit = AuditLog(clock=lambda: NOW)
     disp = Dispatcher(registry=reg, policy=PolicyEngine(POLICY), assets=assets,
@@ -146,7 +154,7 @@ def test_non_patch_item_does_nothing():
     wf, *_ = _build(_FakeCloud())
     adv = Advisory("CVE-X", "osv", [AffectedPackage("foo", fixed_version=None)],
                    mitigation="disable foo")
-    planner = RemediationPlanner(key_ref_for=lambda a: f"ssh-key/{a}")
+    planner = RemediationPlanner()
     mitigation = planner.plan([adv], [HostFindings("canary-01", {"foo": "1.0"})])[0]
     assert mitigation.kind == RemediationKind.MITIGATION
     assert wf.run(mitigation).status == NOT_A_PATCH

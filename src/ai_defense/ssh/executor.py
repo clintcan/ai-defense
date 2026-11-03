@@ -36,7 +36,8 @@ class Transport(Protocol):
     """Executes an argv on a host over SSH. MUST use ``key`` only to connect,
     never log it, and run non-interactively (no TTY)."""
 
-    def run(self, host: str, argv: list[str], *, key: str, timeout: int) -> CommandOutput: ...
+    def run(self, host: str, argv: list[str], *, key: str, timeout: int,
+            user: str = "root", port: int = 22) -> CommandOutput: ...
 
 
 @dataclass(frozen=True)
@@ -57,10 +58,15 @@ class SSHExecutor:
         self._max_output = max_output_bytes
 
     def run_template(self, host: str, template_name: str, params: dict, *,
-                     key: str, dry_run_first: bool = True) -> ExecOutcome:
+                     key: str, user: str = "root", port: int = 22,
+                     dry_run_first: bool = True) -> ExecOutcome:
         template: CommandTemplate = CATALOG[template_name]   # KeyError if not allowlisted
         argv = template.render(params)
         cmd = shlex.join(argv)
+
+        def _run(a):
+            return self._cap(self._transport.run(
+                host, a, key=key, timeout=self._timeout_s, user=user, port=port))
 
         # Denylist wins even over anything the catalog produced.
         if is_denied(cmd):
@@ -75,12 +81,12 @@ class SSHExecutor:
                 if is_denied(shlex.join(dargv)):
                     return ExecOutcome(applied=False, resolved_command=cmd,
                                        blocked_reason="denylist: destructive pattern (dry-run)")
-                dry = self._cap(self._transport.run(host, dargv, key=key, timeout=self._timeout_s))
+                dry = _run(dargv)
                 if dry.exit_code != 0:
                     return ExecOutcome(applied=False, resolved_command=cmd, dry_run=dry,
                                        blocked_reason=f"dry-run failed (exit {dry.exit_code})")
 
-        result = self._cap(self._transport.run(host, argv, key=key, timeout=self._timeout_s))
+        result = _run(argv)
         return ExecOutcome(applied=True, resolved_command=cmd, dry_run=dry, result=result)
 
     def _cap(self, out: CommandOutput) -> CommandOutput:

@@ -83,11 +83,15 @@ Working vertical slice. Implemented and tested end to end:
   key stays in the vault, intent must target a pre-registered control-plane
   asset).
 
-Still stubbed: SSH remediation resolving its connection from the registry (patch
-tools still take host/key_ref in params), other AWS services and cloud providers
-(GCP/Azure), and real advisory-feed / host-inspector / boto3 clients (the seams
-are in place; implementations are injected in tests). Run `pytest` (111 tests)
-and `ruff check src tests`.
+- **Registry-resolved SSH connections** — the patch tool takes only
+  `{asset_id, package}`; host/user/port/key_ref come from the authorized asset
+  in the registry (re-checked at resolve time), so a command can never be aimed
+  at an arbitrary host or key, and the planner never handles connection details.
+
+Still stubbed: other AWS services and cloud providers (GCP/Azure), and real
+advisory-feed / host-inspector / boto3 clients (the seams are in place;
+implementations are injected in tests). Run `pytest` (112 tests) and
+`ruff check src tests`.
 
 ## Dev
 

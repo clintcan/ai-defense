@@ -13,7 +13,6 @@ Every item cites its source advisory for human verification before approval.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -57,19 +56,18 @@ def _priority(advisory: Advisory, patch_available: bool) -> float:
 class RemediationPlanner:
     """Produces a prioritized remediation plan from advisories + observed state.
 
-    ``key_ref_for`` maps an asset id to its SSH key's vault reference (used only
-    to build the patch Intent's params; the value is never resolved here).
+    Patch intents name only the target ``asset_id`` and package; the SSH tool
+    resolves host/user/port/key_ref from the trusted registry, so the planner
+    never handles connection details or secret references.
     ``patch_action_class`` defaults to a canary rollout.
     """
 
     def __init__(
         self,
         *,
-        key_ref_for: Callable[[str], str],
         patch_tool: str = "patch.apply_security_update",
         patch_action_class: ActionClass = ActionClass.PATCH_CANARY,
     ) -> None:
-        self._key_ref_for = key_ref_for
         self._patch_tool = patch_tool
         self._patch_action_class = patch_action_class
 
@@ -87,11 +85,7 @@ class RemediationPlanner:
         if f.patch_available:
             intent = Intent(
                 tool=self._patch_tool,
-                params={
-                    "host": f.asset_id,
-                    "package": f.package,
-                    "key_ref": self._key_ref_for(f.asset_id),
-                },
+                params={"asset_id": f.asset_id, "package": f.package},
                 targets=[f.asset_id],
                 action_class=self._patch_action_class,
                 reason=f"remediate {f.cve_id}: upgrade {f.package} "

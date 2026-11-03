@@ -49,6 +49,9 @@ class AssetRegistry:
     def register(self, asset: Asset) -> None:
         self._assets[asset.asset_id] = asset
 
+    def get(self, asset_id: str) -> Asset | None:
+        return self._assets.get(asset_id)
+
     def require_authorized(self, asset_id: str, now: datetime) -> Asset:
         asset = self._assets.get(asset_id)
         if asset is None:

@@ -9,9 +9,18 @@ from datetime import UTC, datetime, timedelta
 
 from ai_defense.approval.gate import ApprovalGate
 from ai_defense.audit.log import AuditLog
-from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
+from ai_defense.registry.assets import (
+    Asset,
+    AssetRegistry,
+    Authorization,
+    ConnectionInfo,
+)
 from ai_defense.ssh.executor import CommandOutput, SSHExecutor
-from ai_defense.ssh.tools import SECURITY_UPDATE_TOOL, make_security_update_tool
+from ai_defense.ssh.tools import (
+    SECURITY_UPDATE_TOOL,
+    make_security_update_tool,
+    registry_connection_resolver,
+)
 from ai_defense.toolset.dispatch import Dispatcher
 from ai_defense.toolset.intents import ActionClass, Intent
 from ai_defense.toolset.policy import PolicyEngine
@@ -43,7 +52,7 @@ class FakeTransport:
     def __init__(self):
         self.calls = []
 
-    def run(self, host, argv, *, key, timeout):
+    def run(self, host, argv, *, key, timeout, user="root", port=22):
         self.calls.append((host, tuple(argv), key))
         # dry-run and apply both succeed
         return CommandOutput(0, f"upgraded on {host}", "")
@@ -51,12 +60,15 @@ class FakeTransport:
 
 def _build():
     transport = FakeTransport()
-    registry = ToolRegistry()
-    registry.register(make_security_update_tool(SSHExecutor(transport)))
     assets = AssetRegistry()
     assets.register(Asset("canary-01", "ssh-host", "team", "web-prod",
                           Authorization("sig", "lead", NOW - timedelta(days=1),
-                                        NOW + timedelta(days=30))))
+                                        NOW + timedelta(days=30)),
+                          connection=ConnectionInfo(host="canary-01",
+                                                    key_ref="ssh-key/canary")))
+    registry = ToolRegistry()
+    registry.register(make_security_update_tool(
+        SSHExecutor(transport), registry_connection_resolver(assets, clock=lambda: NOW)))
     approvals = ApprovalGate()
     audit = AuditLog(clock=lambda: NOW)
     disp = Dispatcher(
@@ -69,8 +81,7 @@ def _build():
 def _intent():
     return Intent(
         tool=SECURITY_UPDATE_TOOL,
-        params={"host": "canary-01", "package": "openssl", "key_ref": "ssh-key/canary",
-                "snapshot_id": "snap-123"},
+        params={"asset_id": "canary-01", "package": "openssl", "snapshot_id": "snap-123"},
         targets=["canary-01"],
         action_class=ActionClass.PATCH_CANARY,
         reason="remediate CVE-2026-1234 (OpenSSL)",

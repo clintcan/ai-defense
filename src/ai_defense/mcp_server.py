@@ -19,6 +19,7 @@ from typing import Any
 from .composition import Engine, build_demo_engine
 from .registry.assets import Asset
 from .scanner.scanner import HostFindings
+from .upgrade.preflight import OsUpgradeReport
 from .vuln.planner import RemediationItem
 
 TOOLS: list[dict[str, Any]] = [
@@ -41,6 +42,19 @@ TOOLS: list[dict[str, Any]] = [
         "name": "plan",
         "description": "Scan the given assets and return a prioritized remediation "
                        "plan (CISA KEV first): patch / mitigation / escalate.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"asset_ids": {"type": "array", "items": {"type": "string"}}},
+            "required": ["asset_ids"],
+        },
+    },
+    {
+        "name": "upgrade_preflight",
+        "description": "Read-only OS-upgrade eligibility report for the given assets: "
+                       "current release and support status (supported/ESM/EOL), the "
+                       "supported in-place target and full upgrade path, and any blockers "
+                       "(pending reboot, held/broken packages, low disk). Changes nothing; "
+                       "it informs the human decision for an EOL OS.",
         "inputSchema": {
             "type": "object",
             "properties": {"asset_ids": {"type": "array", "items": {"type": "string"}}},
@@ -174,6 +188,15 @@ def _findings_json(f: HostFindings) -> dict:
             "misconfigurations": f.misconfigurations}
 
 
+def _report_json(r: OsUpgradeReport) -> dict:
+    return {"asset_id": r.asset_id, "verdict": r.verdict.value,
+            "current_os": r.current_os, "support_status": r.support_status,
+            "target_version": r.target_version, "target_codename": r.target_codename,
+            "path": r.path,
+            "blockers": [{"code": b.code, "detail": b.detail} for b in r.blockers],
+            "notes": r.notes, "source_ref": r.source_ref}
+
+
 def _item_json(it: RemediationItem) -> dict:
     return {"cve_id": it.cve_id, "asset_id": it.asset_id, "package": it.package,
             "kind": it.kind.value, "priority": it.priority,
@@ -199,6 +222,10 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
         if name == "plan":
             inv = engine.scan(list(args["asset_ids"]))
             return {"plan": [_item_json(it) for it in engine.plan(inv)]}
+
+        if name == "upgrade_preflight":
+            reports = engine.upgrade_preflight(list(args["asset_ids"]))
+            return {"reports": [_report_json(r) for r in reports]}
 
         if name == "remediate":
             return _remediate(engine, args["asset_id"], args["package"],
@@ -326,6 +353,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def plan(asset_ids: list[str]) -> dict:
         return handle_call(engine, "plan", {"asset_ids": asset_ids})
 
+    def upgrade_preflight(asset_ids: list[str]) -> dict:
+        return handle_call(engine, "upgrade_preflight", {"asset_ids": asset_ids})
+
     def remediate(asset_id: str, package: str, snapshot: bool = False) -> dict:
         return handle_call(engine, "remediate",
                            {"asset_id": asset_id, "package": package, "snapshot": snapshot})
@@ -359,9 +389,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
         return handle_call(engine, "cloud_remediate", {
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
-    for fn in (list_assets, scan, plan, remediate, approve_change, audit_tail,
-               onboard_cloud_account, cloud_regions, cloud_discover, cloud_patch_state,
-               cloud_remediate):
+    for fn in (list_assets, scan, plan, upgrade_preflight, remediate, approve_change,
+               audit_tail, onboard_cloud_account, cloud_regions, cloud_discover,
+               cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

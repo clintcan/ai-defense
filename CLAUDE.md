@@ -231,6 +231,31 @@ A patch remediation is sequenced so it is reversible by default:
   approval-gated **CLEANUP** action the operator invokes only once the fix is
   confirmed stable — a safety backup is never destroyed silently.
 
+### 6c. OS-upgrade preflight (read-only) & the OS_UPGRADE workflow (future)
+When a host runs an **end-of-life or ESM-only OS**, many CVEs have no fix in the
+normal stream and the real remediation is moving to a supported release — so the
+vuln planner escalates them for a human decision. The **upgrade preflight** turns
+that escalation into a concrete, human-verifiable report. It is **strictly
+read-only** (CLAUDE.md component 5): it detects and reports, it never changes a
+host.
+- Driven from `/etc/os-release` plus read-only eligibility probes (pending
+  reboot, free disk, held/broken packages) collected by the scanner's
+  `collect_upgrade_state` — off the normal scan path so routine scans stay lean.
+- Reasons only from an **auditable release table** (`upgrade/releases.py`: Ubuntu
+  & Debian EOL/ESM dates and the supported in-place sequence). It never invents a
+  path; an unrecognized OS yields `UNKNOWN` and is escalated. Every report cites
+  its source.
+- Reports: current release + support status (supported / ESM / EOL), the
+  supported **single-step target** and full path to the newest release, any
+  **blockers**, and a verdict (`READY` / `BLOCKED` / `CURRENT` / `UNKNOWN`).
+  Exposed as the `upgrade_preflight` MCP tool.
+- **Driving** the upgrade is a separate, **more strongly gated** `OS_UPGRADE`
+  workflow (not yet enabled): mandatory snapshot/AMI first, canary→fleet, a
+  reboot → reconnect → health-recheck state machine with timed auto-revert, and a
+  post-upgrade re-scan. For cloud images (e.g. Lightsail) the vendor-preferred
+  path may be rebuild-from-blueprint + migrate rather than in-place. Until that
+  workflow lands, the preflight only advises.
+
 ### 6a. Managed configuration primitives
 Config/module/service remediations are expressed as declarative, reviewable
 operations — not raw shell edits — so they can be validated, diffed, and rolled

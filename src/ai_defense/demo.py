@@ -119,11 +119,19 @@ class DemoAwsClient:
 
 
 class DemoInspector:
-    """Read-only host inspector: reports a vulnerable openssl on every host."""
+    """Read-only host inspector: reports a vulnerable openssl on every host, and
+    a (now past-standard-support) Ubuntu 18.04 so the upgrade preflight has
+    something to recommend."""
 
     def collect(self, asset_id: str) -> dict:
         return {"installed_packages": {"openssl": "3.0.5", "bash": "5.1"},
-                "applied_patches": ["KB-1001"], "misconfigurations": []}
+                "applied_patches": ["KB-1001"], "misconfigurations": [],
+                "os_release": {"ID": "ubuntu", "VERSION_ID": "18.04",
+                               "VERSION_CODENAME": "bionic"}}
+
+    def collect_upgrade_state(self, asset_id: str) -> dict:
+        return {"reboot_required": False, "disk_free_mb": 20480,
+                "held_packages": [], "broken_packages_report": ""}
 
 
 @dataclass(frozen=True)

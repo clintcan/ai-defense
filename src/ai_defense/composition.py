@@ -51,6 +51,7 @@ from .toolset.intents import ActionClass, Intent, ToolResult
 from .toolset.policy import PolicyEngine
 from .toolset.ratelimit import RateLimiter
 from .toolset.registry import ToolRegistry
+from .upgrade.preflight import OsUpgradePreflight, OsUpgradeReport
 from .vault.vault import Vault
 from .vuln.feeds import Advisory, AdvisoryFeed, StaticAdvisoryFeed
 from .vuln.planner import RemediationItem, RemediationPlanner
@@ -75,6 +76,7 @@ class Engine:
     planner: RemediationPlanner
     workflow: RemediationWorkflow
     feed: AdvisoryFeed
+    preflighter: OsUpgradePreflight
     clock: Callable[[], datetime] = _utcnow
 
     # -- inventory --------------------------------------------------------
@@ -107,6 +109,14 @@ class Engine:
     def plan(self, inventory: list[HostFindings]) -> list[RemediationItem]:
         # for_inventory lets query-by-package feeds (OSV) fetch only what's relevant
         return self.planner.plan(self.feed.for_inventory(inventory), inventory)
+
+    def upgrade_preflight(self, asset_ids: list[str]) -> list[OsUpgradeReport]:
+        """Read-only OS-upgrade eligibility report per host: current release,
+        support status, supported target/path, and any blockers. Changes
+        nothing — it feeds the human decision the vuln planner escalates to."""
+        today = self.clock()
+        return [self.preflighter.assess(self.scanner.scan_host_for_upgrade(a), today)
+                for a in asset_ids]
 
     def remediate(self, item: RemediationItem, *, snapshot: bool | None = None,
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:
@@ -281,6 +291,7 @@ def build_engine(
         planner=RemediationPlanner(),
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
         feed=feed,
+        preflighter=OsUpgradePreflight(),
         clock=clock,
     )
 

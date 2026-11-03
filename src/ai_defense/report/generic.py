@@ -12,7 +12,7 @@ Schema (``schema_version`` 1.0) — self-describing and stable; see CLAUDE.md
       "summary": { assets, findings, by_kind{}, by_severity{}, kev,
                    eol_assets },
       "assets": [
-        { "asset_id", "os", "ecosystem", "support_status",
+        { "asset_id", "host", "port", "os", "ecosystem", "support_status",
           "upgrade": { "verdict", "target", "path" },
           "findings": [
             { "cve_id", "package", "kind", "severity", "cvss", "kev",
@@ -65,7 +65,8 @@ def to_generic(report: Report) -> dict:
         },
         "assets": [
             {
-                "asset_id": a.asset_id, "os": a.os, "ecosystem": a.ecosystem,
+                "asset_id": a.asset_id, "host": a.host, "port": a.port,
+                "os": a.os, "ecosystem": a.ecosystem,
                 "support_status": a.support_status,
                 "upgrade": {"verdict": a.upgrade_verdict,
                             "target": a.upgrade_target, "path": a.upgrade_path},

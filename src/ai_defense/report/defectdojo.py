@@ -3,7 +3,7 @@
 Produces ``{"findings": [...]}`` that DefectDojo's *Generic Findings Import*
 parser ingests directly. Mapping (see CLAUDE.md "Reporting & export"):
 
-  asset_id            -> endpoints[]            (DefectDojo Endpoint = the host)
+  host (else asset)   -> endpoints[]            (DefectDojo Endpoint = IP:port)
   cve_id (canonical)  -> vulnerability_ids[]    (DefectDojo enriches EPSS/KEV)
   cvss                -> cvssv3_score
   severity band       -> severity               (Critical/High/Medium/Low/Info)
@@ -37,7 +37,8 @@ def _title(f: ReportFinding) -> str:
 
 
 def _description(f: ReportFinding, asset: ReportAsset) -> str:
-    lines = [f.note, "", f"Host: {asset.asset_id}"]
+    host_line = f"Host: {asset.asset_id}" + (f" ({asset.host})" if asset.host else "")
+    lines = [f.note, "", host_line]
     if asset.os:
         lines.append(f"OS: {asset.os}"
                      + (f" ({asset.support_status})" if asset.support_status else ""))
@@ -55,6 +56,12 @@ def _mitigation(f: ReportFinding) -> str:
         return ("No vendor fix available for this release — escalate for a human "
                 "decision (an OS upgrade may be required).")
     return f.note
+
+
+def _endpoint(asset: ReportAsset) -> str:
+    if asset.host:
+        return f"{asset.host}:{asset.port}" if asset.port else asset.host
+    return asset.asset_id
 
 
 def _tags(f: ReportFinding) -> list[str]:
@@ -81,7 +88,8 @@ def _finding(f: ReportFinding, asset: ReportAsset, date: str) -> dict:
         "active": True,
         "verified": True,
         "tags": _tags(f),
-        "endpoints": [asset.asset_id],
+        # DefectDojo Endpoint = the real address when known, else the asset name.
+        "endpoints": [_endpoint(asset)],
     }
     if f.cvss is not None:
         out["cvssv3_score"] = f.cvss

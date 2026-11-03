@@ -57,7 +57,8 @@ def executive_summary_md(report: Report) -> str:
                    + ", ".join(f"{k} {v}" for k, v in by_sev.items()) + ".")
     if eol:
         out.append(f"- **End-of-life / ESM OS: {len(eol)} host(s)** — "
-                   + ", ".join(f"{a.asset_id} ({a.os}, {a.support_status})" for a in eol)
+                   + ", ".join(f"{a.asset_id} ({a.host or 'no-addr'}, {a.os}, "
+                               f"{a.support_status})" for a in eol)
                    + ". These need an OS upgrade; many findings cannot be patched in place.")
     out.append("")
 
@@ -124,6 +125,8 @@ def technical_report_md(report: Report) -> str:
 def _asset_section(a: ReportAsset) -> list[str]:
     out = [f"## {a.asset_id}", ""]
     meta = []
+    if a.host:
+        meta.append(f"**Address:** {a.host}" + (f":{a.port}" if a.port else ""))
     if a.os:
         meta.append(f"**OS:** {a.os}")
     if a.support_status:

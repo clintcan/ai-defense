@@ -59,6 +59,8 @@ class ReportFinding:
 @dataclass(frozen=True)
 class ReportAsset:
     asset_id: str
+    host: str | None = None               # connection address (IP/FQDN) from the registry
+    port: int | None = None
     os: str | None = None                 # "ubuntu 18.04 (bionic)"
     ecosystem: str | None = None          # OSV ecosystem
     support_status: str | None = None     # supported | esm | eol (from preflight)

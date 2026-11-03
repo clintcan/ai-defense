@@ -38,9 +38,11 @@ def build_report(
     provenance: ReportProvenance,
     *,
     audit_verified: bool | None = None,
+    connections: dict[str, dict] | None = None,
 ) -> Report:
     inv_by_id = {hf.asset_id: hf for hf in inventory}
     pf_by_id = {pf.asset_id: pf for pf in preflight_reports}
+    conns = connections or {}
 
     items_by_asset: dict[str, list[RemediationItem]] = {}
     for it in plan_items:                          # plan is already prioritized
@@ -56,8 +58,11 @@ def build_report(
     for aid in asset_ids:
         hf = inv_by_id.get(aid)
         pf = pf_by_id.get(aid)
+        conn = conns.get(aid) or {}
         assets.append(ReportAsset(
             asset_id=aid,
+            host=conn.get("host"),
+            port=conn.get("port"),
             os=_os_string(hf, pf),
             ecosystem=hf.ecosystem if hf else None,
             support_status=pf.support_status if pf else None,

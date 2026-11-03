@@ -3,10 +3,11 @@ markdown, the file writer, and engine/MCP wiring."""
 
 import json
 import os
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from ai_defense.composition import build_demo_engine
 from ai_defense.mcp_server import handle_call
+from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
 from ai_defense.report import ReportProvenance, write_report
 from ai_defense.report.defectdojo import to_defectdojo
 from ai_defense.report.generic import to_generic
@@ -41,7 +42,8 @@ def _report(findings=None, *, support="esm"):
     prov = ReportProvenance(
         generated_at=datetime(2026, 11, 4, 12, 0, 0),
         scope=["h1"], advisory_source="osv.dev", kev_enabled=True)
-    asset = ReportAsset(asset_id="h1", os="ubuntu 18.04 (bionic)", ecosystem="Ubuntu:18.04:LTS",
+    asset = ReportAsset(asset_id="h1", host="203.0.113.136", port=22,
+                        os="ubuntu 18.04 (bionic)", ecosystem="Ubuntu:18.04:LTS",
                         support_status=support, upgrade_verdict="ready",
                         upgrade_target="20.04", upgrade_path=["20.04", "22.04", "24.04"],
                         findings=findings if findings is not None else [_finding()])
@@ -71,6 +73,7 @@ def test_generic_json_schema():
     assert doc["provenance"]["kev_enabled"] is True
     assert doc["summary"]["kev"] == 1 and doc["summary"]["eol_assets"] == ["h1"]
     a = doc["assets"][0]
+    assert a["host"] == "203.0.113.136" and a["port"] == 22
     assert a["upgrade"]["target"] == "20.04"
     f = a["findings"][0]
     assert f["cve_id"] == "CVE-2021-4034" and f["kev"] is True
@@ -84,7 +87,7 @@ def test_defectdojo_import_shape():
     doc = to_defectdojo(_report())
     assert list(doc.keys()) == ["findings"]
     f = doc["findings"][0]
-    assert f["endpoints"] == ["h1"]                       # asset -> endpoint
+    assert f["endpoints"] == ["203.0.113.136:22"]        # real IP:port, not the name
     assert f["vulnerability_ids"] == ["CVE-2021-4034"]
     assert f["unique_id_from_tool"] == "h1:CVE-2021-4034:policykit-1"
     assert f["cvssv3_score"] == 7.8
@@ -118,6 +121,7 @@ def test_executive_summary_highlights_kev_and_eol():
 def test_technical_report_has_per_asset_table():
     md = technical_report_md(_report())
     assert "## h1" in md
+    assert "203.0.113.136" in md                          # IP address shown
     assert "ubuntu 18.04 (bionic)" in md
     assert "0.105-20 → 0.105-20ubuntu0.1" in md           # installed -> fixed
     assert "nvd.nist.gov" in md                            # source link
@@ -149,6 +153,17 @@ def test_engine_report_on_demo(tmp_path):
     assert len(report.kev_findings) == 1
     assert report.provenance.scan_mode == "simulated"     # demo inspector
     assert all(os.path.exists(p) for p in paths.values())
+
+
+def test_engine_report_threads_registry_host():
+    eng = build_demo_engine()
+    now = datetime.now(UTC)
+    eng.registry.register(Asset(
+        "vps-9", "ssh-host", "ops", "prod",
+        Authorization("sig", "op", now - timedelta(minutes=1), now + timedelta(days=90)),
+        connection=ConnectionInfo(host="203.0.113.9", key_ref="ssh-key/x", port=2222)))
+    a = eng.build_report(["vps-9"]).assets[0]
+    assert a.host == "203.0.113.9" and a.port == 2222
 
 
 def test_build_report_populates_asset_os_and_preflight():

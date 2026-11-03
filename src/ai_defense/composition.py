@@ -134,7 +134,19 @@ class Engine:
         preflights = ([self.preflighter.assess(f, today) for f in inv]
                       if include_preflight else [])
         return build_report(inv, plan, preflights, self._report_provenance(asset_ids),
-                            audit_verified=self.audit_ok())
+                            audit_verified=self.audit_ok(),
+                            connections=self._connections(asset_ids))
+
+    def _connections(self, asset_ids: list[str]) -> dict[str, dict]:
+        """Address (host/port) per asset, resolved from the trusted registry so
+        the report shows the real IP, not planner-supplied text."""
+        wanted = set(asset_ids)
+        out: dict[str, dict] = {}
+        for a in self.registry.all():
+            conn = getattr(a, "connection", None)
+            if conn is not None and a.asset_id in wanted:
+                out[a.asset_id] = {"host": conn.host, "port": conn.port}
+        return out
 
     def report(self, asset_ids: list[str], *, out_dir: str | None = None,
                include_preflight: bool = True) -> tuple[Report, dict[str, str]]:

@@ -136,6 +136,18 @@ python -m ai_defense approve --db sqlite+pysqlite:///ai.db \
   --change-set cs_... --approver you                                # authorize one
 ```
 
+### Durable engine (shared across processes)
+
+Give the MCP server a DB and it uses `build_engine(session_factory=...)`: the
+asset registry, approvals, and audit log are all persistent and **shared with
+the operator CLI**. Onboard a VPS with `register-vps`, point the server at the
+same DB, and it sees the asset live; approvals granted in the terminal are
+honoured in chat; everything survives a restart.
+
+```bash
+python -m ai_defense mcp --db sqlite+pysqlite:///ai.db
+```
+
 
 ```json
 { "mcpServers": { "ai-defense": { "command": "python", "args": ["-m", "ai_defense", "mcp"] } } }

@@ -52,10 +52,17 @@ class AssetRegistry:
     def get(self, asset_id: str) -> Asset | None:
         return self._assets.get(asset_id)
 
+    def all(self) -> list[Asset]:
+        return list(self._assets.values())
+
     def require_authorized(self, asset_id: str, now: datetime) -> Asset:
-        asset = self._assets.get(asset_id)
-        if asset is None:
-            raise PermissionError(f"asset not registered: {asset_id}")
-        if not asset.authorization.valid(now):
-            raise PermissionError(f"authorization invalid/expired: {asset_id}")
-        return asset
+        return _require_authorized(self.get(asset_id), asset_id, now)
+
+
+def _require_authorized(asset: Asset | None, asset_id: str, now: datetime) -> Asset:
+    """Shared authorization check for any registry (in-memory or DB-backed)."""
+    if asset is None:
+        raise PermissionError(f"asset not registered: {asset_id}")
+    if not asset.authorization.valid(now):
+        raise PermissionError(f"authorization invalid/expired: {asset_id}")
+    return asset

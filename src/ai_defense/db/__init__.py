@@ -8,6 +8,7 @@ from .database import create_all, init_db, make_engine, make_session_factory
 from .repositories import (
     ApprovalRepository,
     AssetRepository,
+    PersistentAssetRegistry,
     ScanFindingRepository,
     SecretRefRepository,
     SqlAuditStore,
@@ -19,6 +20,7 @@ __all__ = [
     "create_all",
     "make_session_factory",
     "AssetRepository",
+    "PersistentAssetRegistry",
     "ApprovalRepository",
     "ScanFindingRepository",
     "SecretRefRepository",

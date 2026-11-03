@@ -175,8 +175,11 @@ def _remediate(engine: Engine, asset_id: str, package: str, snapshot: bool) -> d
 
 # --- stdio server (lazy mcp import) --------------------------------------
 
-def serve(engine: Engine | None = None) -> None:  # pragma: no cover - needs mcp + stdio
-    """Run the MCP server over stdio. Requires the ``mcp`` extra."""
+def serve(engine: Engine | None = None, *, db: str | None = None) -> None:  # pragma: no cover
+    """Run the MCP server over stdio. Requires the ``mcp`` extra.
+
+    With ``db`` (a DB URL) the engine is durable and shares assets/approvals with
+    the operator CLI, so approvals granted in the terminal are honoured here."""
     import json
 
     import anyio
@@ -184,7 +187,13 @@ def serve(engine: Engine | None = None) -> None:  # pragma: no cover - needs mcp
     from mcp.server.stdio import stdio_server
     from mcp.types import TextContent, Tool
 
-    eng = engine or build_demo_engine()
+    if engine is not None:
+        eng = engine
+    elif db is not None:
+        from .db import init_db
+        eng = build_demo_engine(session_factory=init_db(db))
+    else:
+        eng = build_demo_engine()
     server = Server("ai-defense")
 
     @server.list_tools()

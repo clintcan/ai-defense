@@ -57,7 +57,7 @@ class Engine:
     so every call still passes through policy, authorization, approval, rate
     limits, redaction, and the audit log."""
 
-    registry: AssetRegistry
+    registry: Any           # AssetRegistry or db.PersistentAssetRegistry (duck-typed)
     dispatcher: Dispatcher
     approvals: ApprovalGate
     audit: AuditLog
@@ -69,7 +69,7 @@ class Engine:
 
     # -- inventory --------------------------------------------------------
     def list_assets(self) -> list[Asset]:
-        return [a for a in self.registry._assets.values()]   # noqa: SLF001 (demo introspection)
+        return self.registry.all()
 
     def onboard_ssh(self, **params: Any) -> ToolResult:
         """Propose an onboarding (asset.register) intent. Returns a pending
@@ -106,39 +106,71 @@ class Engine:
         return self.audit.verify()
 
 
-def build_demo_engine(session_factory=None) -> Engine:
-    """Wire the demo engine. With ``session_factory`` (a DB session factory from
-    ``db.init_db``), approvals and the audit log are persisted — an approval
-    survives restarts and is shared across processes (e.g. an operator CLI and
-    the MCP server). Without it, both are in-memory (single process)."""
+_CONTROL_PLANE_ID = "control-plane"
+
+
+def _control_plane_asset(now: datetime) -> Asset:
+    return Asset(
+        _CONTROL_PLANE_ID, "control-plane", "secops", "mgmt",
+        Authorization("root-attestation", "ciso", now, now.replace(year=now.year + 1)),
+    )
+
+
+def build_engine(
+    *,
+    session_factory=None,
+    policy_config: dict | None = None,
+    aws_client: Any = None,
+    inspector: Any = None,
+    transport: Any = None,
+    secrets_backend: Any = None,
+    advisories: list[Advisory] | None = None,
+) -> Engine:
+    """Wire an Engine from parts.
+
+    With ``session_factory`` (from ``db.init_db``) the asset registry, approvals,
+    and audit log are **persistent and cross-process** — onboarded assets and
+    approvals survive restarts and are shared with the operator CLI. Without it,
+    all three are in-memory (single process).
+
+    The backend arguments default to the simulated demo backends; a production
+    build injects real ones (paramiko transport, boto3 client, a real vault) —
+    the wiring is otherwise identical.
+    """
     clock = _utcnow
     now = clock()
+    policy_config = policy_config if policy_config is not None else DEMO_POLICY
 
-    registry = AssetRegistry()
-    # Seed the control-plane asset: the authority under which onboarding runs.
-    registry.register(Asset(
-        "control-plane", "control-plane", "secops", "mgmt",
-        Authorization("root-attestation", "ciso", now, now.replace(year=now.year + 1)),
-    ))
+    vault = Vault(secrets_backend or DemoSecretsBackend())
 
-    vault = Vault(DemoSecretsBackend())
     if session_factory is not None:
-        from .db.repositories import ApprovalRepository, SqlAuditStore
-        approvals: ApprovalGate | PersistentApprovalGate = PersistentApprovalGate(
-            ApprovalRepository(session_factory))
+        from .db.repositories import (
+            ApprovalRepository,
+            AssetRepository,
+            PersistentAssetRegistry,
+            SqlAuditStore,
+        )
+        asset_repo = AssetRepository(session_factory)
+        if asset_repo.get(_CONTROL_PLANE_ID) is None:   # seed once, durably
+            asset_repo.save(_control_plane_asset(now))
+        registry: Any = PersistentAssetRegistry(asset_repo)
+        approvals: Any = PersistentApprovalGate(ApprovalRepository(session_factory))
         audit = AuditLog(clock=clock, store=SqlAuditStore(session_factory))
     else:
+        registry = AssetRegistry()
+        registry.register(_control_plane_asset(now))
         approvals = ApprovalGate()
         audit = AuditLog(clock=clock)
-    policy = PolicyEngine(DEMO_POLICY)
-    rate_limiter = RateLimiter.from_config(DEMO_POLICY)
 
-    aws = DemoAwsClient()
-    client_factory = lambda _creds: aws  # noqa: E731 (demo brevity)
+    policy = PolicyEngine(policy_config)
+    rate_limiter = RateLimiter.from_config(policy_config)
+
+    aws = aws_client or DemoAwsClient()
+    client_factory = lambda _creds: aws  # noqa: E731 (brevity)
 
     tools = ToolRegistry()
     tools.register(make_security_update_tool(
-        SSHExecutor(SimulatedSSHTransport()),
+        SSHExecutor(transport or SimulatedSSHTransport()),
         registry_connection_resolver(registry, clock=clock)))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
@@ -146,7 +178,7 @@ def build_demo_engine(session_factory=None) -> Engine:
     tools.register(make_snapshot_tool(client_factory))
     tools.register(make_snapshot_delete_tool(client_factory))
     tools.register(make_patch_baseline_tool(client_factory))
-    tools.register(make_asset_register_tool(registry.register))
+    tools.register(make_asset_register_tool(registry.register))   # writes through to DB
 
     dispatcher = Dispatcher(
         registry=tools, policy=policy, assets=registry, approvals=approvals,
@@ -155,13 +187,19 @@ def build_demo_engine(session_factory=None) -> Engine:
 
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
-        scanner=AuthenticatedScanner(DemoInspector()),
+        scanner=AuthenticatedScanner(inspector or DemoInspector()),
         planner=RemediationPlanner(),
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
-        feed=StaticAdvisoryFeed(DEMO_ADVISORIES),
+        feed=StaticAdvisoryFeed(advisories if advisories is not None else DEMO_ADVISORIES),
         clock=clock,
     )
 
 
+def build_demo_engine(session_factory=None) -> Engine:
+    """Back-compat wrapper: the demo engine with simulated backends (persistent
+    when a session_factory is given)."""
+    return build_engine(session_factory=session_factory)
+
+
 # Re-export for convenience.
-__all__ = ["Engine", "build_demo_engine", "build_ssh_asset"]
+__all__ = ["Engine", "build_engine", "build_demo_engine", "build_ssh_asset"]

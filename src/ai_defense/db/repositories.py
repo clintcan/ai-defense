@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..approval.gate import ApprovalGate, ApprovalRequest, ApprovalState
 from ..audit.log import GENESIS, AuditRecord
-from ..registry.assets import Asset, AssetRegistry, Authorization, ConnectionInfo
+from ..registry.assets import (
+    Asset,
+    AssetRegistry,
+    Authorization,
+    ConnectionInfo,
+    _require_authorized,
+)
 from ..scanner.scanner import HostFindings
 from .models import (
     ApprovalRow,
@@ -75,6 +81,28 @@ class AssetRepository:
         for asset in self.all():
             reg.register(asset)
         return reg
+
+
+class PersistentAssetRegistry:
+    """DB-backed asset registry (duck-types AssetRegistry). Every lookup queries
+    the DB, so an asset onboarded by another process (e.g. the register-vps CLI)
+    is immediately visible to a running engine, and registrations survive
+    restarts."""
+
+    def __init__(self, repo: AssetRepository) -> None:
+        self._repo = repo
+
+    def register(self, asset: Asset) -> None:
+        self._repo.save(asset)
+
+    def get(self, asset_id: str) -> Asset | None:
+        return self._repo.get(asset_id)
+
+    def all(self) -> list[Asset]:
+        return self._repo.all()
+
+    def require_authorized(self, asset_id: str, now: datetime) -> Asset:
+        return _require_authorized(self._repo.get(asset_id), asset_id, now)
 
 
 def _to_asset(row: AssetRow) -> Asset:

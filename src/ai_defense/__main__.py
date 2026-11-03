@@ -23,9 +23,9 @@ def _run_demo() -> int:
     return 0
 
 
-def _run_mcp() -> int:
+def _run_mcp(db: str | None) -> int:
     from .mcp_server import serve
-    serve()
+    serve(db=db)
     return 0
 
 
@@ -61,7 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ai_defense", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("demo", help="run the local end-to-end demo")
-    sub.add_parser("mcp", help="run the MCP server over stdio (needs the 'mcp' extra)")
+    p_mcp = sub.add_parser("mcp", help="run the MCP server over stdio (needs the 'mcp' extra)")
+    p_mcp.add_argument("--db", default=None,
+                       help="DB URL for a durable engine shared with the operator CLI")
 
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)
@@ -76,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "demo":
         return _run_demo()
     if args.command == "mcp":
-        return _run_mcp()
+        return _run_mcp(args.db)
     if args.command == "pending":
         return _run_pending(args.db)
     if args.command == "approve":

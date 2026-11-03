@@ -63,14 +63,36 @@ equivalent `"command": "...\\.venv\\Scripts\\python.exe", "args": ["-m",
 
 ## 2b. Claude Code (CLI)
 
+**Add** the server (simulated backends, durable DB):
+
 ```bash
 claude mcp add ai-defense -- \
   "C:/path/to/ai_defense/.venv/Scripts/ai-defense.exe" mcp \
   --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
 ```
 
-Then `claude` — the tools are available in the session. (`claude mcp list` to
-check, `claude mcp remove ai-defense` to undo.)
+**Real SSH mode** (patch actual hosts; needs the `ssh` extra and a key dir — see
+"Real SSH mode" below):
+
+```bash
+claude mcp add ai-defense -- \
+  "C:/path/to/ai_defense/.venv/Scripts/ai-defense.exe" mcp \
+  --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" \
+  --ssh-keys "C:/path/to/ai_defense/keys" \
+  --known-hosts "C:/Users/you/.ssh/known_hosts"
+```
+
+**Check / remove / re-add** (re-adding requires removing first — otherwise you
+get `MCP server ai-defense already exists in local config`):
+
+```bash
+claude mcp list                 # should show: ai-defense ... - ✔ Connected
+claude mcp get ai-defense       # show the stored command
+claude mcp remove ai-defense    # remove it
+```
+
+To change the command (e.g. switch to real SSH mode), `remove` then `add` again.
+Then `claude` — the tools are available in the session.
 
 ## 3. Onboard a host first
 

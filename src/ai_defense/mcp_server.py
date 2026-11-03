@@ -173,41 +173,61 @@ def _remediate(engine: Engine, asset_id: str, package: str, snapshot: bool) -> d
     return out
 
 
-# --- stdio server (lazy mcp import) --------------------------------------
+# --- stdio server (lazy mcp import; targets the mcp 2.x MCPServer API) ----
+
+_DESCRIPTIONS = {t["name"]: t["description"] for t in TOOLS}
+
+
+def _engine_for(engine: Engine | None, db: str | None) -> Engine:
+    if engine is not None:
+        return engine
+    if db is not None:
+        from .db import init_db
+        return build_demo_engine(session_factory=init_db(db))
+    return build_demo_engine()
+
+
+def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/import-gated test
+    """Build an mcp 2.x ``MCPServer`` with our tools registered.
+
+    Each tool is a thin typed function delegating to ``handle_call``; the SDK
+    derives the input schema from the function signature. Separated from
+    ``serve`` so the registration can be validated without the stdio loop."""
+    from mcp.server.mcpserver import MCPServer
+
+    server = MCPServer("ai-defense", instructions=(
+        "Defensive patch orchestration. Propose actions; the toolset enforces "
+        "policy, authorization, approval, rate limits and audit. Mutating work "
+        "returns a pending change_set_id until a human approves."))
+
+    def list_assets() -> dict:
+        return handle_call(engine, "list_assets", {})
+
+    def scan(asset_ids: list[str]) -> dict:
+        return handle_call(engine, "scan", {"asset_ids": asset_ids})
+
+    def plan(asset_ids: list[str]) -> dict:
+        return handle_call(engine, "plan", {"asset_ids": asset_ids})
+
+    def remediate(asset_id: str, package: str, snapshot: bool = False) -> dict:
+        return handle_call(engine, "remediate",
+                           {"asset_id": asset_id, "package": package, "snapshot": snapshot})
+
+    def approve_change(change_set_id: str, approver: str = "operator") -> dict:
+        return handle_call(engine, "approve_change",
+                           {"change_set_id": change_set_id, "approver": approver})
+
+    def audit_tail(n: int = 20) -> dict:
+        return handle_call(engine, "audit_tail", {"n": n})
+
+    for fn in (list_assets, scan, plan, remediate, approve_change, audit_tail):
+        server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
+    return server
+
 
 def serve(engine: Engine | None = None, *, db: str | None = None) -> None:  # pragma: no cover
-    """Run the MCP server over stdio. Requires the ``mcp`` extra.
+    """Run the MCP server over stdio. Requires the ``mcp`` extra (>=2).
 
     With ``db`` (a DB URL) the engine is durable and shares assets/approvals with
     the operator CLI, so approvals granted in the terminal are honoured here."""
-    import json
-
-    import anyio
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import TextContent, Tool
-
-    if engine is not None:
-        eng = engine
-    elif db is not None:
-        from .db import init_db
-        eng = build_demo_engine(session_factory=init_db(db))
-    else:
-        eng = build_demo_engine()
-    server = Server("ai-defense")
-
-    @server.list_tools()
-    async def _list_tools() -> list[Tool]:
-        return [Tool(name=t["name"], description=t["description"],
-                     inputSchema=t["inputSchema"]) for t in TOOLS]
-
-    @server.call_tool()
-    async def _call_tool(name: str, arguments: dict) -> list[TextContent]:
-        result = handle_call(eng, name, arguments)
-        return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
-
-    async def _main() -> None:
-        async with stdio_server() as (read, write):
-            await server.run(read, write, server.create_initialization_options())
-
-    anyio.run(_main)
+    build_mcp_server(_engine_for(engine, db)).run("stdio")

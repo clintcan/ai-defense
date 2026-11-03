@@ -80,3 +80,22 @@ def test_unknown_tool_and_missing_arg_return_errors():
     eng = _engine_with_host()
     assert "error" in handle_call(eng, "nope", {})
     assert "error" in handle_call(eng, "scan", {})        # missing asset_ids
+
+
+def test_build_mcp_server_registers_tools_if_sdk_present():
+    # Only runs where the mcp SDK (>=2) is installed; validates serve()'s
+    # registration path against the real API without the stdio loop.
+    import asyncio
+
+    import pytest
+    pytest.importorskip("mcp.server.mcpserver")
+
+    from ai_defense.mcp_server import build_mcp_server
+
+    server = build_mcp_server(_engine_with_host())
+    tools = asyncio.run(server.list_tools())
+    assert {t.name for t in tools} == set(tool_names())
+
+    res = asyncio.run(server.call_tool("plan", {"asset_ids": ["vps-demo-01"]}))
+    assert res.is_error is False
+    assert "CVE-2026-1001" in res.content[0].text

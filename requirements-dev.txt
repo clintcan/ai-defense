@@ -1,0 +1,7 @@
+# Development dependencies (tests, lint, type-check). Installs runtime deps too.
+-r requirements.txt
+
+pytest>=7
+ruff>=0.4
+mypy>=1.8
+pyyaml>=6

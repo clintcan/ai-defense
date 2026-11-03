@@ -93,12 +93,25 @@ advisory-feed / host-inspector / boto3 clients (the seams are in place;
 implementations are injected in tests). Run `pytest` (112 tests) and
 `ruff check src tests`.
 
-## Run it
+## Install & run
+
+One-shot install into a local virtualenv (creates `.venv`, installs the package,
+runs the tests and the demo):
 
 ```bash
-pip install -e ".[dev]"
-python -m ai_defense demo          # full lifecycle on simulated backends, no infra
-pytest                             # 116 tests
+./install.sh                 # Linux/macOS  (optional: ./install.sh dev,aws,mcp)
+```
+```powershell
+.\install.ps1                # Windows      (optional: .\install.ps1 -Extras "dev,aws,mcp")
+```
+
+Or manually:
+
+```bash
+pip install -r requirements-dev.txt   # or: pip install -e ".[dev,mcp]"
+pip install -e .
+python -m ai_defense demo             # full lifecycle on simulated backends, no infra
+pytest                                # test suite
 ```
 
 The demo onboards a VPS (approval-gated), scans it, plans a KEV-first

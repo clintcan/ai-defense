@@ -163,23 +163,24 @@ def test_paramiko_transport_allow_unknown_uses_autoadd(monkeypatch):
     assert _FakeSSHClient.last["policy"] == "AutoAddPolicy"
 
 
-_PPK_BODY = "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n..."
+# an ENCRYPTED .ppk -> native parser defers, falls back to puttygen
+_PPK_ENCRYPTED = ("PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: aes256-cbc\n"
+                  "Public-Lines: 1\nAAAA\nPrivate-Lines: 1\nBBBB\n")
 
 
-def test_putty_ppk_without_puttygen_gives_helpful_error(monkeypatch):
+def test_encrypted_ppk_without_puttygen_gives_helpful_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
     import ai_defense.ssh.paramiko_transport as pt
     monkeypatch.setattr(pt.shutil, "which", lambda _n: None)   # puttygen absent
     with pytest.raises(ValueError, match="puttygen"):
-        pt.ParamikoTransport().run("h", ["true"], key=_PPK_BODY, timeout=5)
+        pt.ParamikoTransport().run("h", ["true"], key=_PPK_ENCRYPTED, timeout=5)
 
 
-def test_putty_ppk_auto_converted_when_puttygen_present(monkeypatch):
+def test_encrypted_ppk_converted_when_puttygen_present(monkeypatch):
     monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
     import ai_defense.ssh.paramiko_transport as pt
     monkeypatch.setattr(pt.shutil, "which", lambda _n: "/usr/bin/puttygen")
 
-    # fake puttygen: writes an OpenSSH key to the -o output path, returns rc 0
     def fake_run(cmd, capture_output=True, text=True, timeout=None):
         out_path = cmd[cmd.index("-o") + 1]
         with open(out_path, "w") as f:
@@ -188,5 +189,5 @@ def test_putty_ppk_auto_converted_when_puttygen_present(monkeypatch):
 
     monkeypatch.setattr(pt.subprocess, "run", fake_run)
 
-    out = pt.ParamikoTransport().run("h", ["true"], key=_PPK_BODY, timeout=5)
+    out = pt.ParamikoTransport().run("h", ["true"], key=_PPK_ENCRYPTED, timeout=5)
     assert out.exit_code == 0            # converted key loaded + command ran

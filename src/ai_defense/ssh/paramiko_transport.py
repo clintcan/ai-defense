@@ -21,9 +21,10 @@ from .executor import CommandOutput
 
 _PPK_HEADER = "PuTTY-User-Key-File"
 _PPK_HELP = (
-    "PuTTY .ppk key detected but 'puttygen' is not on PATH to convert it. "
-    "Either install PuTTY (puttygen), or convert the key once: "
-    "`puttygen mykey.ppk -O private-openssh -o <keydir>/ssh-key/<name>`."
+    "encrypted PuTTY .ppk: native parsing supports only unencrypted keys, and "
+    "'puttygen' is not on PATH to convert this one. Either install a CLI puttygen "
+    "(Linux/WSL), or export an OpenSSH key once from the PuTTYgen GUI "
+    "(Conversions -> Export OpenSSH key)."
 )
 
 
@@ -69,11 +70,16 @@ def _convert_ppk(key_text: str, passphrase: str | None) -> str:
 def _load_key(key_text: str, passphrase: str | None):
     import paramiko
 
-    # PuTTY .ppk is not an OpenSSH key; auto-convert it with puttygen if present
-    # (otherwise _convert_ppk raises a clear "install puttygen / convert" error).
+    # PuTTY .ppk is not an OpenSSH key. Parse it natively (pure Python, no tools)
+    # for unencrypted keys; for an encrypted .ppk fall back to puttygen if present.
     if key_text.lstrip().startswith(_PPK_HEADER):
-        key_text = _convert_ppk(key_text, passphrase)
-        passphrase = None          # the converted OpenSSH key is unencrypted
+        from .ppk import PpkEncryptedError, ppk_to_openssh_pem
+        try:
+            key_text = ppk_to_openssh_pem(key_text)
+            passphrase = None
+        except PpkEncryptedError:
+            key_text = _convert_ppk(key_text, passphrase)   # needs puttygen CLI
+            passphrase = None
 
     # Try the common key types; paramiko has no single auto-detect loader.
     for cls in (getattr(paramiko, n) for n in

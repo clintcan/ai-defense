@@ -49,6 +49,11 @@ class AdvisoryFeed(ABC):
     def fetch(self, since: datetime | None = None) -> list[Advisory]:
         """Return normalized advisories (optionally only those after ``since``)."""
 
+    def for_inventory(self, inventory) -> list[Advisory]:
+        """Advisories relevant to observed host inventory. Query-by-package feeds
+        (e.g. OSV) override this; static feeds ignore the inventory."""
+        return self.fetch()
+
 
 class StaticAdvisoryFeed(AdvisoryFeed):
     """In-memory feed for fixtures/tests and for pinned advisory sets."""

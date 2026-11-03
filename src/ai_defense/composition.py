@@ -50,7 +50,7 @@ from .toolset.policy import PolicyEngine
 from .toolset.ratelimit import RateLimiter
 from .toolset.registry import ToolRegistry
 from .vault.vault import Vault
-from .vuln.feeds import Advisory, StaticAdvisoryFeed
+from .vuln.feeds import Advisory, AdvisoryFeed, StaticAdvisoryFeed
 from .vuln.planner import RemediationItem, RemediationPlanner
 from .vuln.workflow import RemediationWorkflow, WorkflowResult
 
@@ -72,7 +72,7 @@ class Engine:
     scanner: AuthenticatedScanner
     planner: RemediationPlanner
     workflow: RemediationWorkflow
-    feed: StaticAdvisoryFeed
+    feed: AdvisoryFeed
     clock: Callable[[], datetime] = _utcnow
 
     # -- inventory --------------------------------------------------------
@@ -103,7 +103,8 @@ class Engine:
         return self.feed.fetch()
 
     def plan(self, inventory: list[HostFindings]) -> list[RemediationItem]:
-        return self.planner.plan(self.advisories(), inventory)
+        # for_inventory lets query-by-package feeds (OSV) fetch only what's relevant
+        return self.planner.plan(self.feed.for_inventory(inventory), inventory)
 
     def remediate(self, item: RemediationItem, *, snapshot: bool | None = None,
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:
@@ -183,6 +184,7 @@ def build_engine(
     transport: Any = None,
     secrets_backend: Any = None,
     advisories: list[Advisory] | None = None,
+    advisory_feed: Any = None,
 ) -> Engine:
     """Wire an Engine from parts.
 
@@ -257,12 +259,15 @@ def build_engine(
     else:
         host_inspector = inspector or DemoInspector()
 
+    feed = advisory_feed or StaticAdvisoryFeed(
+        advisories if advisories is not None else DEMO_ADVISORIES)
+
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
         scanner=AuthenticatedScanner(host_inspector),
         planner=RemediationPlanner(),
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
-        feed=StaticAdvisoryFeed(advisories if advisories is not None else DEMO_ADVISORIES),
+        feed=feed,
         clock=clock,
     )
 
@@ -275,6 +280,7 @@ def build_ssh_engine(
     allow_unknown_hosts: bool = False,
     policy_config: dict | None = None,
     advisories: list[Advisory] | None = None,
+    advisory_feed: Any = None,
     aws_region: str | None = None,
 ) -> Engine:
     """Engine with the REAL SSH backend: a paramiko transport, a file-backed
@@ -301,14 +307,17 @@ def build_ssh_engine(
         secrets_backend=FileVaultBackend(key_dir),
         inspector_factory=inspector_factory,
         advisories=advisories,
+        advisory_feed=advisory_feed,
         aws_region=aws_region,
     )
 
 
-def build_demo_engine(session_factory=None, *, aws_region: str | None = None) -> Engine:
+def build_demo_engine(session_factory=None, *, aws_region: str | None = None,
+                      advisory_feed: Any = None) -> Engine:
     """Back-compat wrapper: the demo engine with simulated backends (persistent
     when a session_factory is given; live boto3 when aws_region is set)."""
-    return build_engine(session_factory=session_factory, aws_region=aws_region)
+    return build_engine(session_factory=session_factory, aws_region=aws_region,
+                        advisory_feed=advisory_feed)
 
 
 # Re-export for convenience.

@@ -26,7 +26,8 @@ def _run_demo() -> int:
 def _run_mcp(args) -> int:
     from .mcp_server import serve
     serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
-          allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region)
+          allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
+          osv=args.osv, osv_ecosystem=args.osv_ecosystem)
     return 0
 
 
@@ -73,6 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     p_mcp.add_argument("--aws-region", default=None,
                        help="default AWS region -> use live boto3 for cloud tools "
                             "(needs 'aws' extra; creds resolved from the vault)")
+    p_mcp.add_argument("--osv", action="store_true",
+                       help="pull real advisories from OSV.dev for observed packages")
+    p_mcp.add_argument("--osv-ecosystem", default="Debian",
+                       help="OSV ecosystem for queries (default: Debian)")
 
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)

@@ -162,6 +162,18 @@ baseline — approval-gated). Flow: *"Onboard AWS account 123456789012 with
 credential_ref aws/prod"* → approve → *"discover instances in 123456789012"* →
 *"patch i-0abc… in that account"* → approve → done.
 
+## Live vulnerability data (OSV)
+
+Add `--osv` so `plan` queries OSV.dev for the packages a scan observed, instead
+of the built-in demo advisory set (uses stdlib HTTP, no extra install):
+
+```json
+"args": ["mcp", "--db", "...", "--ssh-keys", "...", "--osv", "--osv-ecosystem", "Debian"]
+```
+
+Set `--osv-ecosystem` to match your hosts (e.g. `Debian`, `Ubuntu`). Then
+"scan + plan" reflects real CVEs with their fixed versions.
+
 ## Real SSH mode (patch actual hosts)
 
 By default the server uses **simulated** backends (nothing touches real hosts).

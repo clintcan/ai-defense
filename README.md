@@ -101,8 +101,13 @@ Working vertical slice. Implemented and tested end to end:
   via `onboard_cloud_account`, `cloud_discover` (EC2 + Lightsail),
   `cloud_patch_state`, and `cloud_remediate` (SSM baseline, approval-gated).
 
-Still stubbed: OSV/NVD advisory clients and other cloud providers (GCP/Azure) —
-the seams are in place. Run `pytest` and `ruff check src tests`.
+- **Live vulnerability data (OSV)** — `--osv` makes the planner query OSV.dev for
+  the packages a scan actually observed (stdlib HTTP, no extra dep), normalizing
+  real CVEs into the same `Advisory` shape the correlator/planner use. Without
+  it, the built-in demo advisory set is used.
+
+Still stubbed: other cloud providers (GCP/Azure) — the seams are in place. Run
+`pytest` and `ruff check src tests`.
 
 ## Install & run
 

@@ -169,6 +169,15 @@ class ApprovalRepository:
                 gate.request(req)
         return gate
 
+    def summaries(self) -> list[dict]:
+        """Lightweight listing for an operator UI: id, state, blast radius, ref."""
+        with self._sf() as s:
+            rows = s.execute(select(ApprovalRow).order_by(ApprovalRow.requested_at)).scalars().all()
+            return [{"change_set_id": r.change_set_id, "state": r.state,
+                     "blast_radius": r.blast_radius, "source_ref": r.source_ref,
+                     "approvals_required": r.approvals_required,
+                     "approvers": [v.approver for v in r.votes]} for r in rows]
+
 
 # --- scan findings ------------------------------------------------------
 

@@ -123,6 +123,20 @@ the toolset enforces: a `remediate` returns *pending* with a `change_set_id`
 until a human calls `approve_change`, and the MCP client also prompts the human
 before any tool runs. Example client config:
 
+### Durable, out-of-band approvals
+
+With a `PersistentApprovalGate` (a `session_factory` passed to
+`build_demo_engine`), approvals are stored in the DB — they survive restarts and
+are shared across processes, so an operator can approve from the terminal while
+the chat/MCP session waits:
+
+```bash
+python -m ai_defense pending --db sqlite+pysqlite:///ai.db          # list change-sets
+python -m ai_defense approve --db sqlite+pysqlite:///ai.db \
+  --change-set cs_... --approver you                                # authorize one
+```
+
+
 ```json
 { "mcpServers": { "ai-defense": { "command": "python", "args": ["-m", "ai_defense", "mcp"] } } }
 ```

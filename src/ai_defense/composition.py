@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .advisories import DEMO_ADVISORIES
-from .approval.gate import ApprovalGate, ApprovalState
+from .approval.gate import ApprovalGate, ApprovalState, PersistentApprovalGate
 from .audit.log import AuditLog, AuditRecord
 from .cloud.tools import (
     make_ec2_discovery_tool,
@@ -106,7 +106,11 @@ class Engine:
         return self.audit.verify()
 
 
-def build_demo_engine() -> Engine:
+def build_demo_engine(session_factory=None) -> Engine:
+    """Wire the demo engine. With ``session_factory`` (a DB session factory from
+    ``db.init_db``), approvals and the audit log are persisted — an approval
+    survives restarts and is shared across processes (e.g. an operator CLI and
+    the MCP server). Without it, both are in-memory (single process)."""
     clock = _utcnow
     now = clock()
 
@@ -118,8 +122,14 @@ def build_demo_engine() -> Engine:
     ))
 
     vault = Vault(DemoSecretsBackend())
-    approvals = ApprovalGate()
-    audit = AuditLog(clock=clock)
+    if session_factory is not None:
+        from .db.repositories import ApprovalRepository, SqlAuditStore
+        approvals: ApprovalGate | PersistentApprovalGate = PersistentApprovalGate(
+            ApprovalRepository(session_factory))
+        audit = AuditLog(clock=clock, store=SqlAuditStore(session_factory))
+    else:
+        approvals = ApprovalGate()
+        audit = AuditLog(clock=clock)
     policy = PolicyEngine(DEMO_POLICY)
     rate_limiter = RateLimiter.from_config(DEMO_POLICY)
 

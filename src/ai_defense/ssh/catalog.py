@@ -3,6 +3,13 @@
 Commands are built by binding validated params into a fixed template, never by
 string concatenation of planner-supplied text. A template unknown to the
 catalog cannot be executed.
+
+Package installs/updates live here as templates. Configuration-change
+remediations (config file edits, kernel module blacklisting, service
+enable/disable) are NOT free-form commands — they go through the managed,
+declarative primitives in ``ai_defense.ssh.hardening`` (CLAUDE.md component 6a),
+which add backup, diff, syntax validation, the protected-service guard, and a
+recorded rollback action.
 """
 
 from __future__ import annotations

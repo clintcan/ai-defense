@@ -161,10 +161,43 @@ command *that would run*, never the secrets behind it.
 - For each finding it builds a **remediation plan**:
   - **Patch available** → propose the vendor update via the patch tools.
   - **No patch yet** → propose the published **mitigation/workaround** from the
-    advisory (config change, feature disable, WAF/firewall rule, access
-    restriction) — clearly labeled as a temporary mitigation, with a tracking
-    item to apply the real patch once released.
+    advisory — clearly labeled as a temporary mitigation, with a tracking item
+    to apply the real patch once released.
   - **Neither available** → raise for human decision; do not improvise.
+- **Remediation is not only package installs.** Mitigation and hardening
+  frequently means *changing system configuration*. Supported remediation action
+  types:
+  - **Config file edits** — e.g. `sshd_config`, `sysctl.conf`, TLS/cipher
+    settings, auth/PAM config, application config.
+  - **Kernel module changes** — blacklist/disable unused or insecure modules
+    (e.g. `dccp`, `sctp`, `usb-storage`), or load a hardening module.
+  - **Service state changes** — `disable`/`mask` an unneeded or vulnerable
+    service; enable a protective one.
+  - WAF/firewall rules, access restrictions, feature disables.
+  These go through **managed, idempotent primitives** (below), never free-form
+  edits, and are subject to the same denylist, dry-run, approval, canary, and
+  rollback rules as any other change.
+
+### 6a. Managed configuration primitives
+Config/module/service remediations are expressed as declarative, reviewable
+operations — not raw shell edits — so they can be validated, diffed, and rolled
+back:
+- **Config edits**: parameterized set-key/ensure-line/ensure-block operations
+  against a known file, applied from templates. The executor **backs up the file,
+  renders the change, shows the approver a diff, validates syntax** where a
+  checker exists (`sshd -t`, `nginx -t`, `visudo -c`, `sysctl -p --dry-run`),
+  and only then applies and reloads. Idempotent: re-running makes no further
+  change.
+- **Kernel modules**: managed via drop-ins (e.g. `/etc/modprobe.d/*.conf`
+  blacklist/install lines) plus a runtime `modprobe -r`/`modprobe`, with the
+  module name validated against an allowlisted set of hardening targets.
+- **Services**: managed `systemctl enable/disable/mask/start/stop`, where the
+  unit name is checked against the **denylist first** — security-critical units
+  (`auditd`, `firewalld`, `ufw`, …) can never be disabled/masked, even with
+  approval. Disabling a *vulnerable or unneeded* service is allowed; disabling a
+  *protective* one is not.
+- Every such primitive records a **rollback action** (restore the backed-up
+  file, re-enable the service, remove the blacklist drop-in) in the audit log.
 - Every proposed action cites its source advisory and is **verifiable by a human
   against the official advisory** before approval. The planner never invents a
   fix; if it can't cite a vendor/advisory source, it escalates instead.

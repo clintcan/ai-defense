@@ -76,10 +76,18 @@ Working vertical slice. Implemented and tested end to end:
   AWS-RunPatchBaseline, scanning (read-only) before installing, as a `MUTATING`
   approval-gated tool whose blast radius is the target instance count.
 
-Still stubbed: other AWS services and cloud providers (GCP/Azure), and real
-advisory-feed / host-inspector / boto3 clients (the seams are in place;
-implementations are injected in tests). Run `pytest` (105 tests) and
-`ruff check src tests`.
+- **Asset onboarding** — `ssh-host` assets carry `ConnectionInfo`
+  (host/port/user + vault `key_ref`). Register a VPS out-of-band via the
+  `register-vps` CLI (`python -m ai_defense.onboarding`), or let the LLM propose
+  it through the approval-gated `asset.register` tool (`ONBOARD` action class;
+  key stays in the vault, intent must target a pre-registered control-plane
+  asset).
+
+Still stubbed: SSH remediation resolving its connection from the registry (patch
+tools still take host/key_ref in params), other AWS services and cloud providers
+(GCP/Azure), and real advisory-feed / host-inspector / boto3 clients (the seams
+are in place; implementations are injected in tests). Run `pytest` (111 tests)
+and `ruff check src tests`.
 
 ## Dev
 

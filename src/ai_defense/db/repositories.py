@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ..approval.gate import ApprovalGate, ApprovalRequest, ApprovalState
 from ..audit.log import GENESIS, AuditRecord
-from ..registry.assets import Asset, AssetRegistry, Authorization
+from ..registry.assets import Asset, AssetRegistry, Authorization, ConnectionInfo
 from ..scanner.scanner import HostFindings
 from .models import (
     ApprovalRow,
@@ -46,6 +46,11 @@ class AssetRepository:
             row.kind = asset.kind
             row.owner = asset.owner
             row.environment = asset.environment
+            conn = asset.connection
+            row.conn_host = conn.host if conn else None
+            row.conn_port = conn.port if conn else None
+            row.conn_user = conn.user if conn else None
+            row.conn_key_ref = conn.key_ref if conn else None
             a = asset.authorization
             row.authorizations.append(AuthorizationRow(
                 attestation_sig=a.attestation_sig, granted_by=a.granted_by,
@@ -74,12 +79,19 @@ class AssetRepository:
 
 def _to_asset(row: AssetRow) -> Asset:
     latest = max(row.authorizations, key=lambda a: a.granted_at)
+    connection = None
+    if row.conn_host:
+        connection = ConnectionInfo(
+            host=row.conn_host, key_ref=row.conn_key_ref or "",
+            port=row.conn_port or 22, user=row.conn_user or "root",
+        )
     return Asset(
         asset_id=row.asset_id, kind=row.kind, owner=row.owner, environment=row.environment,
         authorization=Authorization(
             attestation_sig=latest.attestation_sig, granted_by=latest.granted_by,
             granted_at=latest.granted_at, expires_at=latest.expires_at,
         ),
+        connection=connection,
     )
 
 

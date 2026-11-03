@@ -20,12 +20,26 @@ class Authorization:
 
 
 @dataclass(frozen=True)
+class ConnectionInfo:
+    """How to reach an ``ssh-host`` asset. ``key_ref`` points at the SSH key in
+    the vault — the key itself is never stored here (or anywhere the planner can
+    see). Resolved from the trusted registry, not from planner-supplied text, so
+    a command can never be aimed at an arbitrary host."""
+
+    host: str                 # IP or DNS name
+    key_ref: str              # vault reference to the private key / certificate
+    port: int = 22
+    user: str = "root"
+
+
+@dataclass(frozen=True)
 class Asset:
     asset_id: str
-    kind: str                 # "ssh-host" | "cloud-account" | ...
+    kind: str                 # "ssh-host" | "cloud-account" | "control-plane" | ...
     owner: str
     environment: str          # e.g. "web-prod"
     authorization: Authorization
+    connection: ConnectionInfo | None = None   # for ssh-host assets
 
 
 class AssetRegistry:

@@ -24,6 +24,7 @@ class ActionClass(str, Enum):
     PATCH_FLEET = "patch_fleet"
     EMERGENCY = "emergency"
     CLEANUP = "cleanup"              # e.g. deleting a pre-change snapshot once stable
+    ONBOARD = "onboard"             # register a new asset into the authorization ledger
 
 
 @dataclass(frozen=True)

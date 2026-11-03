@@ -73,10 +73,23 @@ command *that would run*, never the secrets behind it.
 ### 1. Asset registry & authorization ledger
 - Every managed host/account is registered with: owner, environment tag,
   authorization attestation, and the approval policy that applies to it.
+  `ssh-host` assets also carry `ConnectionInfo` (host/port/user + a `key_ref`
+  into the vault — never the key itself), so a command resolves its target from
+  the trusted registry, not from planner-supplied text.
 - Actions can only target **registered** assets. An unregistered target is a
   hard error, not a prompt the model can argue past.
 - Authorization attestations are signed and timestamped; expired attestations
   disable write actions on that asset until renewed.
+- **Onboarding is the trust root, so it is human-anchored.** Two paths:
+  - *Operator (out-of-band):* `onboarding.register_ssh_host` / the `register-vps`
+    CLI — a person registers a VPS and supplies the attestation.
+  - *LLM-proposed (approval-gated):* the `asset.register` tool (capability
+    MUTATING, `ONBOARD` action class). The model drafts only non-secret details;
+    the SSH key is pre-loaded into the vault and referenced by `key_ref` (the
+    tool verifies it resolves, never handling the value). The onboarding intent
+    must **target a pre-registered control-plane asset**, so the "all targets
+    authorized" invariant holds — the model cannot bootstrap its own authority —
+    and it passes the approval gate before anything is written.
 
 ### 2. Secrets vault (credentials never touch the LLM)
 - Backed by a real secrets manager (HashiCorp Vault / AWS Secrets Manager /

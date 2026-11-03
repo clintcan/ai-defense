@@ -66,6 +66,13 @@ class AssetRow(Base):
     owner: Mapped[str] = mapped_column(String(128))
     environment: Mapped[str] = mapped_column(String(64), index=True)
 
+    # Connection info for ssh-host assets (nullable for non-SSH assets). No
+    # secret material here — conn_key_ref points at the key in the vault.
+    conn_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    conn_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    conn_user: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    conn_key_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
     authorizations: Mapped[list[AuthorizationRow]] = relationship(
         back_populates="asset", cascade="all, delete-orphan",
     )

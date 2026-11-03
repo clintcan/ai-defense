@@ -22,8 +22,9 @@ from ..registry.assets import AssetRegistry
 from ..vault.vault import Vault
 from .intents import Intent, ToolResult
 from .policy import Decision, PolicyEngine
+from .ratelimit import RateLimiter
 from .redaction import redact_result, redact_value
-from .registry import ToolRegistry
+from .registry import ToolCapability, ToolRegistry
 from .validators import ValidationError, validate
 
 
@@ -67,6 +68,7 @@ class Dispatcher:
         clock: Callable[[], datetime] = _utcnow,
         approval_ttl: timedelta = timedelta(hours=1),
         change_set_id: Callable[[Intent], str] = default_change_set_id,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self._registry = registry
         self._policy = policy
@@ -77,6 +79,7 @@ class Dispatcher:
         self._clock = clock
         self._approval_ttl = approval_ttl
         self._change_set_id = change_set_id
+        self._rate_limiter = rate_limiter
 
     @property
     def registry(self) -> ToolRegistry:
@@ -162,10 +165,22 @@ class Dispatcher:
                 secrets_seen.add(str(value))
             return value
 
+        # Rate limit & concurrency caps apply to mutating changes only, checked
+        # atomically right before execution. A reservation holds a concurrency
+        # slot until the finally releases it.
+        reservation = None
+        if self._rate_limiter is not None and spec.capability is ToolCapability.MUTATING:
+            reservation, reason = self._rate_limiter.try_begin(intent.targets, now)
+            if reservation is None:
+                return self._deny(intent, f"rate limit: {reason}")
+
         try:
             result = spec.executor(intent.params, resolve_secret=resolve_secret)
         except Exception as exc:  # noqa: BLE001 - deliberate fail-safe: any tool error becomes a denied result, never a leak or a partial success
             return self._deny(intent, f"execution error: {type(exc).__name__}")
+        finally:
+            if reservation is not None:
+                self._rate_limiter.end(reservation)
 
         # 6. Redact any resolved secret from the result, then audit + return.
         result = redact_result(result, secrets_seen)

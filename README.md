@@ -41,8 +41,11 @@ Working vertical slice. Implemented and tested end to end:
   remediations, and a durable hash-chained audit log that still `verify()`s
   after reload.
 
-Still stubbed: cloud adapters, the vuln feeds/planner, the scanner internals,
-and policy rate-limiting. Run `pytest` (52 tests) and `ruff check src tests`.
+- **Policy rate limiting** — `per_host_changes_per_hour` and `fleet_concurrency`
+  enforced on mutating changes via an atomic check-and-reserve `RateLimiter`.
+
+Still stubbed: cloud adapters, the vuln feeds/planner, and the scanner
+internals. Run `pytest` (64 tests) and `ruff check src tests`.
 
 ## Dev
 

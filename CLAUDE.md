@@ -118,7 +118,10 @@ the toolset; there is no other way to reach a provider or host:
 4. **Policy** — blast-radius caps, autonomy, and approval requirement.
 5. **Approval gate** — anything not autonomous waits for human approval (N-of-M,
    canary→fleet precondition, expiry).
-6. **Resolve secrets** from the vault, **execute**, **redact** every resolved
+6. **Rate limit** — for mutating changes, atomic check-and-reserve against
+   `per_host_changes_per_hour` and `fleet_concurrency`; the concurrency slot is
+   held until execution finishes (released in a `finally`).
+7. **Resolve secrets** from the vault, **execute**, **redact** every resolved
    secret from the result, **audit** (hash-chained), and return a `ToolResult`.
 
 Any failure is **fail-safe**: no execution, an `ok=False` result, and an audit

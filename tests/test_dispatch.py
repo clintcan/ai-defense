@@ -14,6 +14,7 @@ from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
 from ai_defense.toolset.dispatch import Dispatcher
 from ai_defense.toolset.intents import ActionClass, Intent, ToolResult
 from ai_defense.toolset.policy import PolicyEngine
+from ai_defense.toolset.ratelimit import InMemoryRateBackend, RateLimiter
 from ai_defense.toolset.redaction import PLACEHOLDER
 from ai_defense.toolset.registry import ToolCapability, ToolRegistry, ToolSpec
 from ai_defense.vault.vault import SecretsBackend, Vault
@@ -74,7 +75,7 @@ def _assets(expired=False):
     return reg
 
 
-def _dispatcher(assets=None, approvals=None, vault=None, audit=None):
+def _dispatcher(assets=None, approvals=None, vault=None, audit=None, rate_limiter=None):
     return Dispatcher(
         registry=_registry(),
         policy=PolicyEngine(POLICY_CONFIG),
@@ -83,7 +84,20 @@ def _dispatcher(assets=None, approvals=None, vault=None, audit=None):
         vault=vault or Vault(FakeBackend({"ssh-key/web": "SUPER-SECRET-KEY"})),
         audit=audit or AuditLog(clock=lambda: NOW),
         clock=lambda: NOW,
+        rate_limiter=rate_limiter,
     )
+
+
+def _approved_dispatcher(rate_limiter):
+    """A dispatcher whose approvals auto-clear, to exercise the execute path."""
+    approvals = ApprovalGate()
+    disp = _dispatcher(approvals=approvals, rate_limiter=rate_limiter)
+    return disp, approvals
+
+
+def _approve(disp, approvals, intent):
+    cs_id = disp.dispatch(intent).data["change_set_id"]
+    approvals.decide(cs_id, "lead", approve=True, now=NOW)
 
 
 def _scan_intent():
@@ -260,3 +274,80 @@ def _four_assets():
                            Authorization("s", "l", NOW - timedelta(days=1),
                                          NOW + timedelta(days=30))))
     return reg
+
+
+# --- rate limiting & concurrency (integration) --------------------------
+
+def _patch(pkg, targets=("web-prod-01",)):
+    return Intent(tool="patch.apply", params={"host": "web-prod-01", "pkg": pkg},
+                  targets=list(targets), action_class=ActionClass.PATCH_CANARY,
+                  reason="r", source_ref="CVE-2026-1234")
+
+
+def test_scans_are_never_rate_limited():
+    # A limiter that would block any change must not touch read-only scans.
+    disp = _dispatcher(rate_limiter=RateLimiter(per_host_changes_per_hour=0,
+                                                fleet_concurrency=0))
+    for _ in range(5):
+        assert disp.dispatch(_scan_intent()).ok
+
+
+def test_mutating_change_rate_limited_per_host():
+    rl = RateLimiter(per_host_changes_per_hour=1)
+    disp, approvals = _approved_dispatcher(rl)
+
+    a = _patch("openssl")
+    _approve(disp, approvals, a)
+    assert disp.dispatch(a).ok                    # first change counts
+
+    b = _patch("bash")
+    _approve(disp, approvals, b)
+    res = disp.dispatch(b)                         # second within the hour
+    assert not res.ok and "rate limit" in res.summary
+
+
+def test_fleet_concurrency_blocks_then_frees():
+    rl = RateLimiter(fleet_concurrency=1)
+    held, _ = rl.try_begin(["other-host"], NOW)   # occupy the only slot
+    disp, approvals = _approved_dispatcher(rl)
+
+    a = _patch("openssl")
+    _approve(disp, approvals, a)
+    assert not disp.dispatch(a).ok                # no slot -> blocked
+
+    rl.end(held)                                  # free the slot
+    assert disp.dispatch(a).ok
+
+
+def test_concurrency_slot_released_after_success():
+    backend = InMemoryRateBackend()
+    disp, approvals = _approved_dispatcher(RateLimiter(backend, fleet_concurrency=1))
+    a = _patch("openssl")
+    _approve(disp, approvals, a)
+    assert disp.dispatch(a).ok
+    assert backend.current_concurrency() == 0     # released, not leaked
+
+
+def test_concurrency_slot_released_on_execution_error():
+    backend = InMemoryRateBackend()
+    rl = RateLimiter(backend, fleet_concurrency=1)
+
+    reg = ToolRegistry()
+
+    def boom(params, *, resolve_secret):
+        raise RuntimeError("kaboom")
+
+    reg.register(ToolSpec("patch.apply", schema={}, executor=boom,
+                          capability=ToolCapability.MUTATING))
+    approvals = ApprovalGate()
+    disp = Dispatcher(
+        registry=reg, policy=PolicyEngine(POLICY_CONFIG), assets=_assets(),
+        approvals=approvals, vault=Vault(FakeBackend({})),
+        audit=AuditLog(clock=lambda: NOW), clock=lambda: NOW, rate_limiter=rl,
+    )
+    a = _patch("openssl")
+    cs_id = disp.dispatch(a).data["change_set_id"]
+    approvals.decide(cs_id, "lead", approve=True, now=NOW)
+    res = disp.dispatch(a)
+    assert not res.ok and "execution error" in res.summary
+    assert backend.current_concurrency() == 0     # finally released the slot

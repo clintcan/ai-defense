@@ -34,6 +34,8 @@ def test_infer_ssh_user():
     assert infer_ssh_user("amazon_linux_2") == "ec2-user"
     assert infer_ssh_user("wordpress") == "bitnami"
     assert infer_ssh_user("lamp_8_bitnami") == "bitnami"
+    assert infer_ssh_user("nodejs_10_1_0") == "bitnami"   # Lightsail app stack
+    assert infer_ssh_user("django_4") == "bitnami"
     assert infer_ssh_user("freebsd_13") == "ubuntu"     # unknown -> default
     assert infer_ssh_user(None) == "ubuntu"
 
@@ -71,6 +73,33 @@ def test_onboard_environment_override_and_per_host_key():
     assert saved["web-1"].environment == "staging"       # override applied
     assert res["skipped"][0]["instance"] == "db-1"
     assert "key_ref" in res["skipped"][0]["reason"]
+
+
+def test_onboard_skips_non_running_instances():
+    reg = _Reg()
+    insts = [
+        {"name": "up", "public_ip": "1.1.1.1", "platform": "ubuntu_22_04", "state": "running"},
+        {"name": "down", "public_ip": "2.2.2.2", "platform": "ubuntu_22_04", "state": "stopped"},
+    ]
+    res = onboard_instances(insts, reg.register, owner="o", granted_by="o",
+                            attestation_sig="s", default_key_ref="k")
+    assert [a.asset_id for a in reg.saved] == ["up"]
+    assert res["skipped"] == [{"instance": "down", "reason": "not running (state=stopped)"}]
+
+
+def test_onboard_skips_already_registered_unless_update():
+    reg = _Reg()
+    insts = [{"name": "web-1", "public_ip": "1.1.1.1", "platform": "ubuntu_22_04"}]
+    # already registered -> skipped by default
+    res = onboard_instances(insts, reg.register, owner="o", granted_by="o",
+                            attestation_sig="s", default_key_ref="k",
+                            existing_ids={"web-1"})
+    assert reg.saved == [] and "already registered" in res["skipped"][0]["reason"]
+    # --update overwrites
+    res2 = onboard_instances(insts, reg.register, owner="o", granted_by="o",
+                             attestation_sig="s", default_key_ref="k",
+                             existing_ids={"web-1"}, update=True)
+    assert [a.asset_id for a in reg.saved] == ["web-1"] and res2["skipped"] == []
 
 
 def test_onboard_dry_run_writes_nothing():

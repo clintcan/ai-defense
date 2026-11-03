@@ -56,6 +56,8 @@ def register_ssh_host(repo, **kwargs) -> Asset:
 
 # SSH login user by cloud image family (substring match on the platform /
 # Lightsail blueprint id). Covers the common AWS images; override with --user.
+# OS-only blueprints use their distro user; Lightsail application stacks are
+# Bitnami images and log in as `bitnami`.
 _USER_BY_PLATFORM: list[tuple[str, str]] = [
     ("ubuntu", "ubuntu"),
     ("debian", "admin"),
@@ -65,9 +67,24 @@ _USER_BY_PLATFORM: list[tuple[str, str]] = [
     ("centos", "centos"),
     ("fedora", "fedora"),
     ("suse", "ec2-user"),
+    # Lightsail Bitnami application stacks -> `bitnami`
     ("bitnami", "bitnami"),
     ("wordpress", "bitnami"),
     ("lamp", "bitnami"),
+    ("lemp", "bitnami"),
+    ("mean", "bitnami"),
+    ("node", "bitnami"),        # nodejs_*
+    ("django", "bitnami"),
+    ("ghost", "bitnami"),
+    ("drupal", "bitnami"),
+    ("joomla", "bitnami"),
+    ("magento", "bitnami"),
+    ("redmine", "bitnami"),
+    ("gitlab", "bitnami"),
+    ("prestashop", "bitnami"),
+    ("opencart", "bitnami"),
+    ("mediawiki", "bitnami"),
+    ("phpbb", "bitnami"),
     ("nginx", "bitnami"),
     ("plesk", "ubuntu"),
 ]
@@ -91,18 +108,21 @@ def onboard_instances(
     environment: str | None = None,
     default_key_ref: str | None = None, key_ref_by_name: dict[str, str] | None = None,
     user: str | None = None, port: int = 22, ttl_days: int = 90,
+    existing_ids: set[str] | None = None, update: bool = False,
     now: datetime | None = None, dry_run: bool = False,
 ) -> dict:
     """Operator bulk onboarding (option 1, out-of-band) from discovered cloud
     instances (the normalized dicts ``cloud_discover`` returns).
 
     One signed ssh-host registration per instance. A host is **skipped** (never
-    guessed around) when it lacks a reachable address or a ``key_ref`` — the SSH
-    private key must already be in the vault; only the reference is stored, never
-    the key. ``dry_run`` builds and reports the registrations without writing.
+    guessed around) when it is already registered (unless ``update``), is not
+    running, lacks a reachable address, or lacks a ``key_ref`` — the SSH private
+    key must already be in the vault; only the reference is stored, never the
+    key. ``dry_run`` builds and reports the registrations without writing.
     Returns ``{registered: [...], skipped: [{instance, reason}], dry_run}``."""
     now = now or _utcnow()
     key_map = key_ref_by_name or {}
+    known = existing_ids or set()
     registered: list[dict] = []
     skipped: list[dict] = []
 
@@ -110,6 +130,14 @@ def onboard_instances(
         name = inst.get("name") or inst.get("instance_id")
         if not name:
             skipped.append({"instance": "<unnamed>", "reason": "no name/instance_id"})
+            continue
+        if name in known and not update:
+            skipped.append({"instance": name,
+                            "reason": "already registered (use --update to overwrite)"})
+            continue
+        state = inst.get("state")
+        if state is not None and state != "running":
+            skipped.append({"instance": name, "reason": f"not running (state={state})"})
             continue
         host = inst.get("public_ip") or inst.get("private_ip")
         if not host:

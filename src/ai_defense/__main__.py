@@ -138,11 +138,13 @@ def _run_bulk_onboard(args) -> int:
         with open(args.key_ref_map, encoding="utf-8") as fh:
             key_map = json.load(fh)
 
+    existing_ids = {a.asset_id for a in engine.list_assets() if a.kind == "ssh-host"}
     result = onboard_instances(
         instances, engine.registry.register,
         owner=args.owner, granted_by=args.granted_by, attestation_sig=args.attestation_sig,
         environment=args.environment, default_key_ref=args.key_ref, key_ref_by_name=key_map,
-        user=args.user, port=args.port, ttl_days=args.ttl_days, dry_run=args.dry_run,
+        user=args.user, port=args.port, ttl_days=args.ttl_days,
+        existing_ids=existing_ids, update=args.update, dry_run=args.dry_run,
     )
 
     verb = "would register" if args.dry_run else "registered"
@@ -227,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="SSH user override (default: inferred from platform/blueprint)")
     p_bulk.add_argument("--port", type=int, default=22)
     p_bulk.add_argument("--ttl-days", type=int, default=90)
+    p_bulk.add_argument("--update", action="store_true",
+                        help="re-register hosts that already exist (default: skip them)")
     p_bulk.add_argument("--dry-run", action="store_true", help="preview without writing")
     _add_engine_args(p_bulk)
 

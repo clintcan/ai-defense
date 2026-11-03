@@ -114,15 +114,23 @@ def _range_bounds(ranges: list) -> tuple[str | None, str | None]:
 
 
 def _cvss_score(severity: list) -> float | None:
-    # OSV gives a CVSS vector, not a number; map the base metrics crudely is out
-    # of scope, so surface a numeric only if one is directly provided.
+    # OSV gives a CVSS *vector* (e.g. "CVSS:3.1/AV:N/..."); compute the base
+    # score from it. Prefer a v3 vector; also accept a bare number if present.
+    from .cvss import base_score_from_vector
+
+    scores = []
     for s in severity:
         val = s.get("score")
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            continue
-    return None
+        if isinstance(val, str) and val.startswith("CVSS:3"):
+            computed = base_score_from_vector(val)
+            if computed is not None:
+                scores.append(computed)
+        else:
+            try:
+                scores.append(float(val))
+            except (TypeError, ValueError):
+                continue
+    return max(scores) if scores else None
 
 
 def _parse_dt(value: Any) -> datetime | None:

@@ -24,6 +24,10 @@ dependencies = [
 dev = ["pytest", "ruff", "mypy", "pyyaml"]
 aws = ["boto3>=1.34"]
 
+[project.scripts]
+ai-defense = "ai_defense.__main__:main"
+register-vps = "ai_defense.onboarding:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

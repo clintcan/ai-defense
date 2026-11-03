@@ -93,12 +93,20 @@ advisory-feed / host-inspector / boto3 clients (the seams are in place;
 implementations are injected in tests). Run `pytest` (112 tests) and
 `ruff check src tests`.
 
-## Dev
+## Run it
 
 ```bash
 pip install -e ".[dev]"
-pytest
+python -m ai_defense demo          # full lifecycle on simulated backends, no infra
+pytest                             # 116 tests
 ```
+
+The demo onboards a VPS (approval-gated), scans it, plans a KEV-first
+remediation, patches the top finding (approval-gated, dry-run first), and prints
+the hash-chained audit log — all through the real dispatcher, so you see policy,
+authorization, the approval gate, rate limits, and redaction in action. The
+`composition.build_demo_engine()` wiring differs from production only in the
+backends it injects (simulated vault/SSH/AWS vs. real ones).
 
 ## Non-negotiables (enforced in code review)
 

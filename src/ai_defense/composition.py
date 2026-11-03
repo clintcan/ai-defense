@@ -185,6 +185,8 @@ def build_engine(
     secrets_backend: Any = None,
     advisories: list[Advisory] | None = None,
     advisory_feed: Any = None,
+    enrich_kev: bool = False,
+    kev_catalog: Any = None,
 ) -> Engine:
     """Wire an Engine from parts.
 
@@ -261,6 +263,9 @@ def build_engine(
 
     feed = advisory_feed or StaticAdvisoryFeed(
         advisories if advisories is not None else DEMO_ADVISORIES)
+    if enrich_kev:
+        from .vuln.kev import KevCatalog, KevEnrichedFeed
+        feed = KevEnrichedFeed(feed, kev_catalog or KevCatalog())
 
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
@@ -281,6 +286,7 @@ def build_ssh_engine(
     policy_config: dict | None = None,
     advisories: list[Advisory] | None = None,
     advisory_feed: Any = None,
+    enrich_kev: bool = False,
     aws_region: str | None = None,
 ) -> Engine:
     """Engine with the REAL SSH backend: a paramiko transport, a file-backed
@@ -308,16 +314,17 @@ def build_ssh_engine(
         inspector_factory=inspector_factory,
         advisories=advisories,
         advisory_feed=advisory_feed,
+        enrich_kev=enrich_kev,
         aws_region=aws_region,
     )
 
 
 def build_demo_engine(session_factory=None, *, aws_region: str | None = None,
-                      advisory_feed: Any = None) -> Engine:
+                      advisory_feed: Any = None, enrich_kev: bool = False) -> Engine:
     """Back-compat wrapper: the demo engine with simulated backends (persistent
     when a session_factory is given; live boto3 when aws_region is set)."""
     return build_engine(session_factory=session_factory, aws_region=aws_region,
-                        advisory_feed=advisory_feed)
+                        advisory_feed=advisory_feed, enrich_kev=enrich_kev)
 
 
 # Re-export for convenience.

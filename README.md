@@ -106,6 +106,11 @@ Working vertical slice. Implemented and tested end to end:
   real CVEs into the same `Advisory` shape the correlator/planner use. Without
   it, the built-in demo advisory set is used.
 
+- **CISA KEV enrichment** — `--kev` fetches CISA's Known Exploited
+  Vulnerabilities catalog and flags matching advisories `kev=True`, so
+  actively-exploited CVEs sort to the top of the plan. Wraps any feed (OSV or
+  the demo set).
+
 Still stubbed: other cloud providers (GCP/Azure) — the seams are in place. Run
 `pytest` and `ruff check src tests`.
 

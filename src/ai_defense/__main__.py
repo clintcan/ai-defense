@@ -27,7 +27,7 @@ def _run_mcp(args) -> int:
     from .mcp_server import serve
     serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
           allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
-          osv=args.osv, osv_ecosystem=args.osv_ecosystem)
+          osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev)
     return 0
 
 
@@ -78,6 +78,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="pull real advisories from OSV.dev for observed packages")
     p_mcp.add_argument("--osv-ecosystem", default="Debian",
                        help="OSV ecosystem for queries (default: Debian)")
+    p_mcp.add_argument("--kev", action="store_true",
+                       help="mark CISA KEV (known-exploited) advisories -> top priority")
 
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)

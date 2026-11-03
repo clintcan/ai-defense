@@ -174,6 +174,13 @@ of the built-in demo advisory set (uses stdlib HTTP, no extra install):
 Set `--osv-ecosystem` to match your hosts (e.g. `Debian`, `Ubuntu`). Then
 "scan + plan" reflects real CVEs with their fixed versions.
 
+Add `--kev` to also fetch CISA's Known Exploited Vulnerabilities catalog and
+sort actively-exploited CVEs to the top of the plan:
+
+```json
+"args": ["mcp", "--db", "...", "--osv", "--osv-ecosystem", "Debian", "--kev"]
+```
+
 ## Real SSH mode (patch actual hosts)
 
 By default the server uses **simulated** backends (nothing touches real hosts).

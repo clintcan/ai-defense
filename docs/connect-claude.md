@@ -29,8 +29,8 @@ Edit `claude_desktop_config.json`
 {
   "mcpServers": {
     "ai-defense": {
-      "command": "C:\\path\\to\\ai_defense\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "ai_defense", "mcp",
+      "command": "C:\\path\\to\\ai_defense\\.venv\\Scripts\\ai-defense.exe",
+      "args": ["mcp",
                "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"]
     }
   }
@@ -39,11 +39,27 @@ Edit `claude_desktop_config.json`
 
 Restart Claude Desktop. "ai-defense" should appear in the tools (plug) menu.
 
+**Use the `ai-defense.exe` from the venv as the command** — it is self-contained
+and avoids the most common failure, where `command` points at an interpreter
+(plain `python`) that doesn't have the package installed, so the server crashes
+at startup with `ModuleNotFoundError: No module named 'ai_defense'`. The
+equivalent `"command": "...\\.venv\\Scripts\\python.exe", "args": ["-m",
+"ai_defense", "mcp", ...]` also works, as long as it is the **venv** python.
+
+### If it still says the server failed
+
+- Check Claude Desktop's MCP logs: `%APPDATA%\Claude\logs\` (files named
+  `mcp-server-ai-defense.log` / `mcp.log`). The startup traceback is there.
+- Verify the command runs on its own (should print nothing and wait, Ctrl-C to
+  stop — a traceback means a real error):
+  `C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe mcp`
+- Make sure the JSON is valid (no trailing commas) and paths use `\\` or `/`.
+
 ## 2b. Claude Code (CLI)
 
 ```bash
 claude mcp add ai-defense -- \
-  "C:/path/to/ai_defense/.venv/Scripts/python.exe" -m ai_defense mcp \
+  "C:/path/to/ai_defense/.venv/Scripts/ai-defense.exe" mcp \
   --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
 ```
 

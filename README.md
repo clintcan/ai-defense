@@ -43,14 +43,15 @@ Working vertical slice. Implemented and tested end to end:
 
 - **Policy rate limiting** — `per_host_changes_per_hour` and `fleet_concurrency`
   enforced on mutating changes via an atomic check-and-reserve `RateLimiter`.
-- **AWS adapter (read-only discovery)** — EC2 instance inventory and SSM patch
-  state behind an injected client seam (boto3 is an optional `[aws]` extra);
-  exposed as `READ_ONLY` discovery tools that resolve the AWS credential per
-  call from the vault.
+- **AWS adapter (read-only discovery)** — EC2 instance inventory, SSM patch
+  state, and Lightsail instances behind an injected client seam (boto3 is an
+  optional `[aws]` extra); exposed as `READ_ONLY` discovery tools that resolve
+  the AWS credential per call from the vault. Instances are normalized to one
+  stable shape tagged by `service` (`ec2` / `lightsail`).
 
-Still stubbed: AWS protective/write ops (snapshot, patch-baseline), other cloud
-providers, the vuln feeds/planner, and the scanner internals. Run `pytest`
-(72 tests) and `ruff check src tests`.
+Still stubbed: AWS protective/write ops (snapshot, patch-baseline), other AWS
+services and cloud providers, the vuln feeds/planner, and the scanner
+internals. Run `pytest` (74 tests) and `ruff check src tests`.
 
 ## Dev
 

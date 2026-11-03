@@ -38,11 +38,34 @@ class AwsAdapter(CloudAdapter):
             tags = _tags_to_map(i.get("Tags"))
             out.append({
                 "account": account,
+                "service": "ec2",
                 "instance_id": i.get("InstanceId"),
                 "state": (i.get("State") or {}).get("Name"),
                 "platform": i.get("PlatformDetails") or i.get("Platform") or "linux",
                 "name": tags.get("Name"),
                 "private_ip": i.get("PrivateIpAddress"),
+                "tags": tags,
+            })
+        return out
+
+    def list_lightsail_instances(self, account: str) -> list[dict]:
+        """Lightsail is a separate service; its instances never appear in EC2
+        DescribeInstances. Normalized to the same stable instance dict, tagged
+        ``service='lightsail'`` so downstream code can tell them apart (their
+        patch/snapshot model differs from EC2)."""
+        out = []
+        for i in self._client.get_lightsail_instances():
+            tags = {t["key"]: t.get("value") for t in (i.get("tags") or []) if "key" in t}
+            out.append({
+                "account": account,
+                "service": "lightsail",
+                "instance_id": i.get("name"),          # Lightsail keys on name
+                "arn": i.get("arn"),
+                "state": (i.get("state") or {}).get("name"),
+                "platform": i.get("blueprintId") or "linux",
+                "name": i.get("name"),
+                "private_ip": i.get("privateIpAddress"),
+                "public_ip": i.get("publicIpAddress"),
                 "tags": tags,
             })
         return out

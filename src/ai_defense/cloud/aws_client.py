@@ -22,6 +22,9 @@ class AwsClient(Protocol):
     def describe_instance_patch_states(self, instance_ids: list[str]) -> list[dict]:
         """SSM patch-state summaries for the given instances."""
 
+    def get_lightsail_instances(self) -> list[dict]:
+        """All Lightsail instances in the account/region (separate service API)."""
+
 
 class Boto3AwsClient:
     """Real client. Untested against live AWS in this scaffold; requires the
@@ -51,6 +54,7 @@ class Boto3AwsClient:
             )
         self._ec2 = session.client("ec2")
         self._ssm = session.client("ssm")
+        self._lightsail = session.client("lightsail")
 
     def describe_instances(self, *, filters=None, instance_ids=None) -> list[dict]:
         kwargs: dict[str, Any] = {}
@@ -71,3 +75,15 @@ class Boto3AwsClient:
         for page in paginator.paginate(InstanceIds=instance_ids):
             out.extend(page.get("InstancePatchStates", []))
         return out
+
+    def get_lightsail_instances(self) -> list[dict]:
+        # GetInstances is page-token based (no boto3 paginator).
+        out: list[dict] = []
+        token: str | None = None
+        while True:
+            kwargs = {"pageToken": token} if token else {}
+            resp = self._lightsail.get_instances(**kwargs)
+            out.extend(resp.get("instances", []))
+            token = resp.get("nextPageToken")
+            if not token:
+                return out

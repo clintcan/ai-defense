@@ -18,6 +18,7 @@ from .aws_client import AwsClient
 
 EC2_DISCOVERY_TOOL = "aws.ec2.list_instances"
 PATCH_STATE_TOOL = "aws.ssm.describe_patch_state"
+LIGHTSAIL_DISCOVERY_TOOL = "aws.lightsail.list_instances"
 
 ClientFactory = Callable[[dict], AwsClient]
 
@@ -46,6 +47,32 @@ def make_ec2_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
                 "credential_ref": {"type": "string"},
                 "filters": {"type": "array"},
                 "instance_ids": {"type": "array"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.READ_ONLY,
+    )
+
+
+def make_lightsail_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        credentials = resolve_secret(params["credential_ref"])
+        adapter = AwsAdapter(client_factory(credentials))
+        instances = adapter.list_lightsail_instances(params["account"])
+        return ToolResult(
+            ok=True, tool=LIGHTSAIL_DISCOVERY_TOOL,
+            summary=f"{len(instances)} Lightsail instance(s) in account {params['account']}",
+            data={"account": params["account"], "instances": instances},
+        )
+
+    return ToolSpec(
+        name=LIGHTSAIL_DISCOVERY_TOOL,
+        schema={
+            "type": "object",
+            "required": ["account", "credential_ref"],
+            "properties": {
+                "account": {"type": "string"},
+                "credential_ref": {"type": "string"},
             },
         },
         executor=_execute,

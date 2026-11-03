@@ -9,8 +9,10 @@ from ai_defense.audit.log import AuditLog
 from ai_defense.cloud.aws import AwsAdapter
 from ai_defense.cloud.tools import (
     EC2_DISCOVERY_TOOL,
+    LIGHTSAIL_DISCOVERY_TOOL,
     PATCH_STATE_TOOL,
     make_ec2_discovery_tool,
+    make_lightsail_discovery_tool,
     make_patch_state_tool,
 )
 from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
@@ -46,6 +48,20 @@ class FakeAwsClient:
             },
         ]
 
+    def get_lightsail_instances(self):
+        self.calls.append(("get_lightsail_instances",))
+        return [
+            {
+                "name": "ls-blog-1",
+                "arn": "arn:aws:lightsail:us-east-1:123456789012:Instance/abc",
+                "state": {"name": "running"},
+                "blueprintId": "ubuntu_22_04",
+                "privateIpAddress": "172.26.0.5",
+                "publicIpAddress": "3.4.5.6",
+                "tags": [{"key": "env", "value": "prod"}, {"key": "owner"}],
+            },
+        ]
+
     def describe_instance_patch_states(self, instance_ids):
         self.calls.append(("describe_instance_patch_states", instance_ids))
         return [
@@ -64,11 +80,24 @@ def test_list_instances_normalizes():
     adapter = AwsAdapter(FakeAwsClient())
     out = adapter.list_instances("123456789012")
     assert out[0] == {
-        "account": "123456789012", "instance_id": "i-001", "state": "running",
-        "platform": "Linux/UNIX", "name": "web-1", "private_ip": "10.0.0.5",
-        "tags": {"Name": "web-1", "env": "prod"},
+        "account": "123456789012", "service": "ec2", "instance_id": "i-001",
+        "state": "running", "platform": "Linux/UNIX", "name": "web-1",
+        "private_ip": "10.0.0.5", "tags": {"Name": "web-1", "env": "prod"},
     }
     assert out[1]["name"] is None and out[1]["tags"] == {}
+
+
+def test_list_lightsail_instances_normalizes():
+    adapter = AwsAdapter(FakeAwsClient())
+    out = adapter.list_lightsail_instances("123456789012")
+    assert len(out) == 1
+    inst = out[0]
+    assert inst["service"] == "lightsail"
+    assert inst["instance_id"] == "ls-blog-1"       # Lightsail keys on name
+    assert inst["state"] == "running"
+    assert inst["platform"] == "ubuntu_22_04"
+    assert inst["public_ip"] == "3.4.5.6"
+    assert inst["tags"] == {"env": "prod", "owner": None}   # valueless tag kept
 
 
 def test_describe_patch_state_compliance_flag():
@@ -174,3 +203,20 @@ def test_discovery_requires_registered_account():
     )
     res = disp.dispatch(intent)
     assert not res.ok and "authorization" in res.data["reason"]
+
+
+def test_lightsail_discovery_runs_autonomously():
+    fake = FakeAwsClient()
+    disp, audit, backend = _dispatcher_with(make_lightsail_discovery_tool(lambda creds: fake))
+    intent = Intent(
+        tool=LIGHTSAIL_DISCOVERY_TOOL,
+        params={"account": "123456789012", "credential_ref": "aws/discovery-role"},
+        targets=["123456789012"], action_class=ActionClass.DISCOVERY, reason="inventory",
+    )
+    res = disp.dispatch(intent)
+    assert res.ok
+    assert res.data["instances"][0]["service"] == "lightsail"
+    assert res.data["instances"][0]["instance_id"] == "ls-blog-1"
+    # credential resolved via vault and never exposed
+    assert backend.access_log and backend.access_log[0][0] == "aws/discovery-role"
+    assert AWS_SECRET not in str(res.data)

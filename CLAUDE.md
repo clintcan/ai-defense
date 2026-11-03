@@ -103,6 +103,27 @@ command *that would run*, never the secrets behind it.
 - Each write tool declares its blast radius so the policy engine and the human
   approver can see exactly how many assets are affected.
 
+### 3a. Dispatch pipeline (the one path every intent travels)
+Every intent the planner submits goes through a single enforcement pipeline in
+the toolset; there is no other way to reach a provider or host:
+
+1. **Validate** the intent against the registered tool's schema.
+2. **Capability check** — each tool declares a capability (`read_only`,
+   `protective`, `mutating`) and the action classes it may run under. A
+   *mutating* tool can never be dispatched under an autonomous (read-only)
+   action class, so it cannot bypass approval by being mislabeled. Enforced
+   before policy, independent of it.
+3. **Authorize targets** — every target must be a registered asset with a valid,
+   unexpired authorization attestation.
+4. **Policy** — blast-radius caps, autonomy, and approval requirement.
+5. **Approval gate** — anything not autonomous waits for human approval (N-of-M,
+   canary→fleet precondition, expiry).
+6. **Resolve secrets** from the vault, **execute**, **redact** every resolved
+   secret from the result, **audit** (hash-chained), and return a `ToolResult`.
+
+Any failure is **fail-safe**: no execution, an `ok=False` result, and an audit
+record — and internal error text is never surfaced to the planner.
+
 ### 4. SSH executor (human-approved command execution)
 - The model never gets a shell. It submits a **command intent**:
   `{host, command_template, params, reason, cve_ref}`.

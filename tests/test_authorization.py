@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from ai_defense.registry.assets import Asset, Authorization, AssetRegistry
+from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
 
 
 def _asset(expired=False):

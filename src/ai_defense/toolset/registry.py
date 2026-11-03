@@ -11,17 +11,45 @@ The dispatch path for every intent is:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from enum import Enum
+from typing import Any, Protocol
 
-from .intents import Intent, ToolResult
+from .intents import ActionClass, ToolResult
+
+
+class ToolCapability(str, Enum):
+    """What a tool is actually able to do. Declared at registration and enforced
+    at dispatch, independently of the action class the planner claims. This is a
+    defense-in-depth guard: a MUTATING tool can never be dispatched under an
+    autonomous (read-only/protective) action class, so it can never bypass the
+    approval gate by being mislabeled."""
+
+    READ_ONLY = "read_only"      # discovery / authenticated scanning; no change
+    PROTECTIVE = "protective"    # snapshot/backup before a change; autonomous-ok
+    MUTATING = "mutating"        # changes a system; always needs approval
+
+
+# Which action classes each capability may legitimately run under.
+_ALLOWED_CLASSES: dict[ToolCapability, set[ActionClass]] = {
+    ToolCapability.READ_ONLY: {ActionClass.DISCOVERY, ActionClass.SCAN},
+    ToolCapability.PROTECTIVE: {ActionClass.PROTECTIVE},
+    ToolCapability.MUTATING: {
+        ActionClass.MITIGATE_CANARY, ActionClass.MITIGATE_FLEET,
+        ActionClass.PATCH_CANARY, ActionClass.PATCH_FLEET,
+        ActionClass.EMERGENCY,
+    },
+}
 
 
 class Executor(Protocol):
     """A registered tool's execution function. Receives validated params and a
     secret-resolver callback; MUST NOT accept or return raw secrets."""
 
-    def __call__(self, params: dict[str, Any], *, resolve_secret: Callable[[str], Any]) -> ToolResult: ...
+    def __call__(
+        self, params: dict[str, Any], *, resolve_secret: Callable[[str], Any]
+    ) -> ToolResult: ...
 
 
 @dataclass(frozen=True)
@@ -29,8 +57,15 @@ class ToolSpec:
     name: str
     schema: dict                 # JSON schema for params
     executor: Executor
-    read_only: bool
+    capability: ToolCapability
     describe_blast_radius: Callable[[dict], int] | None = None
+
+    @property
+    def read_only(self) -> bool:
+        return self.capability is ToolCapability.READ_ONLY
+
+    def allows(self, action_class: ActionClass) -> bool:
+        return action_class in _ALLOWED_CLASSES[self.capability]
 
 
 class ToolRegistry:
@@ -51,7 +86,3 @@ class ToolRegistry:
 
     def names(self) -> list[str]:
         return sorted(self._tools)
-
-    def dispatch(self, intent: Intent) -> ToolResult:
-        """End-to-end dispatch. TODO: wire policy, approval, vault, audit."""
-        raise NotImplementedError("dispatch pipeline not yet implemented")

@@ -8,6 +8,7 @@ default ``UrllibHttpClient`` uses the standard library (no extra dependency).
 
 from __future__ import annotations
 
+import concurrent.futures as cf
 import json
 import re
 import urllib.request
@@ -17,6 +18,7 @@ from typing import Any, Protocol
 from .feeds import Advisory, AdvisoryFeed, AffectedPackage
 
 OSV_BASE = "https://api.osv.dev"
+_DEFAULT_WORKERS = 8
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
 
@@ -45,10 +47,12 @@ class UrllibHttpClient:
 
 class OsvFeed(AdvisoryFeed):
     def __init__(self, http_client: HttpClient | None = None, *,
-                 ecosystem: str = "Debian", base_url: str = OSV_BASE) -> None:
+                 ecosystem: str = "Debian", base_url: str = OSV_BASE,
+                 max_workers: int = _DEFAULT_WORKERS) -> None:
         self._http = http_client or UrllibHttpClient()
         self._ecosystem = ecosystem
         self._base = base_url.rstrip("/")
+        self._max_workers = max(1, max_workers)
 
     def fetch(self, since: datetime | None = None) -> list[Advisory]:
         # OSV is query-by-package, not a global listing.
@@ -68,17 +72,47 @@ class OsvFeed(AdvisoryFeed):
                    for eco, n, v in triples]
         resp = self._http.post_json(f"{self._base}/v1/querybatch", {"queries": queries})
 
+        # querybatch returns only vuln ids, and the same id recurs across packages
+        # and query rows. Dedupe to the UNIQUE set before fetching details — the
+        # per-vuln GETs are the expensive leg — then fetch those concurrently.
+        vuln_ids = sorted({
+            v.get("id")
+            for result in resp.get("results", [])
+            for v in result.get("vulns", []) or []
+            if v.get("id")
+        })
+        if not vuln_ids:
+            return []
+        details = self._fetch_details(vuln_ids)
+
+        # Build keyed by canonical CVE; iterate sorted ids so the winner for a
+        # given CVE is deterministic regardless of fetch-completion order.
         advisories: dict[str, Advisory] = {}
-        for result in resp.get("results", []):
-            for vuln in result.get("vulns", []):
-                vid = vuln.get("id")
-                if not vid or vid in advisories:
-                    continue
-                detail = self._http.get_json(f"{self._base}/v1/vulns/{vid}")
-                adv = _to_advisory(detail)
-                if adv is not None:
-                    advisories[adv.cve_id] = adv
+        for vid in vuln_ids:
+            detail = details.get(vid)
+            if detail is None:
+                continue
+            adv = _to_advisory(detail)
+            if adv is not None:
+                advisories.setdefault(adv.cve_id, adv)
         return list(advisories.values())
+
+    def _fetch_details(self, vuln_ids: list[str]) -> dict[str, dict]:
+        """Fetch each unique vuln's detail. Parallel (I/O-bound) when there is
+        more than one and workers > 1; otherwise a simple serial fetch."""
+        def get(vid: str) -> dict:
+            return self._http.get_json(f"{self._base}/v1/vulns/{vid}")
+
+        if len(vuln_ids) == 1 or self._max_workers == 1:
+            return {vid: get(vid) for vid in vuln_ids}
+
+        out: dict[str, dict] = {}
+        workers = min(self._max_workers, len(vuln_ids))
+        with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(get, vid): vid for vid in vuln_ids}
+            for fut in cf.as_completed(futures):
+                out[futures[fut]] = fut.result()      # re-raises like the serial path
+        return out
 
 
 def _canonical_cve(osv_id: str, aliases: list[str]) -> str:

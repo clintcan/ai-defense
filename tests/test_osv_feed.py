@@ -125,6 +125,49 @@ def test_for_inventory_empty_makes_no_request():
     assert http.posts == []
 
 
+def test_detail_fetch_dedupes_and_parallelizes():
+    # Three packages; two share the SAME vuln id. Detail must be fetched once per
+    # UNIQUE id (2 GETs, not 3), and all distinct advisories returned.
+    import threading
+
+    details = {
+        "OSV-A": {"id": "OSV-A", "aliases": ["CVE-2030-1"],
+                  "affected": [{"package": {"name": "pkg1"}}]},
+        "OSV-B": {"id": "OSV-B", "aliases": ["CVE-2030-2"],
+                  "affected": [{"package": {"name": "pkg3"}}]},
+    }
+
+    class _Http:
+        def __init__(self):
+            self.get_ids = []
+            self._lock = threading.Lock()
+
+        def post_json(self, url, body):
+            # pkg1 and pkg2 both map to OSV-A; pkg3 maps to OSV-B
+            out = []
+            for q in body["queries"]:
+                name = q["package"]["name"]
+                if name in ("pkg1", "pkg2"):
+                    out.append({"vulns": [{"id": "OSV-A"}]})
+                elif name == "pkg3":
+                    out.append({"vulns": [{"id": "OSV-B"}]})
+                else:
+                    out.append({})
+            return {"results": out}
+
+        def get_json(self, url):
+            vid = url.rsplit("/", 1)[-1]
+            with self._lock:
+                self.get_ids.append(vid)
+            return details[vid]
+
+    http = _Http()
+    inv = [HostFindings("h1", {"pkg1": "1", "pkg2": "1", "pkg3": "1"})]
+    advs = OsvFeed(http, max_workers=4).for_inventory(inv)
+    assert sorted(a.cve_id for a in advs) == ["CVE-2030-1", "CVE-2030-2"]
+    assert sorted(http.get_ids) == ["OSV-A", "OSV-B"]      # each unique id fetched once
+
+
 def test_osv_advisories_correlate_against_inventory():
     feed = OsvFeed(FakeHttp(), ecosystem="Debian")
     inv = [HostFindings("h1", {"openssl": "3.0.5"})]

@@ -141,6 +141,27 @@ hash-chained trail (`audit_tail`).
 - Credentials never pass through Claude; the SSH key is resolved from the vault
   by `key_ref` at execution time and redacted from results and the audit log.
 
+## Real AWS mode (manage cloud from chat)
+
+Add `--aws-region` to use **live boto3** for the cloud tools (install the extra:
+`pip install -e ".[aws]"`). Authentication is by **CLI profile**: store a small
+credential descriptor in the vault that the account's `credential_ref` points at,
+e.g. a file `<keys>/aws/prod` containing `{"profile": "secops", "region": "us-east-1"}`
+(or just the profile name). No AWS keys are stored by this tool.
+
+```json
+"args": ["mcp",
+         "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db",
+         "--ssh-keys", "C:\\path\\to\\ai_defense\\keys",
+         "--aws-region", "us-east-1"]
+```
+
+Cloud tools exposed to chat: `onboard_cloud_account`, `cloud_discover` (EC2 +
+Lightsail), `cloud_patch_state` (SSM compliance), `cloud_remediate` (SSM patch
+baseline — approval-gated). Flow: *"Onboard AWS account 123456789012 with
+credential_ref aws/prod"* → approve → *"discover instances in 123456789012"* →
+*"patch i-0abc… in that account"* → approve → done.
+
 ## Real SSH mode (patch actual hosts)
 
 By default the server uses **simulated** backends (nothing touches real hosts).

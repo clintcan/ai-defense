@@ -25,6 +25,8 @@ instance-snapshot API for Lightsail).
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from typing import Any, Protocol
 
 
@@ -184,3 +186,38 @@ class Boto3AwsClient:
         )
         command = resp.get("Command", {})
         return {"command_id": command.get("CommandId"), "status": command.get("Status")}
+
+
+def _normalize_credentials(creds: Any) -> dict:
+    """Accept the vault-resolved credential in any convenient form and return the
+    descriptor dict Boto3AwsClient expects.
+
+    - dict                      -> used as-is
+    - JSON string               -> parsed
+    - plain string (e.g. "prod")-> treated as a CLI profile name
+    """
+    if isinstance(creds, dict):
+        return creds
+    if isinstance(creds, str):
+        text = creds.strip()
+        if text.startswith("{"):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                pass
+        return {"profile": text}
+    raise TypeError(f"unsupported AWS credential type: {type(creds).__name__}")
+
+
+def boto3_client_factory(default_region: str | None = None) -> Callable[[Any], Boto3AwsClient]:
+    """Build a client factory for the cloud tools. The factory receives the
+    vault-resolved credential, normalizes it (profile / JSON / dict), and
+    constructs a Boto3AwsClient. Region comes from the credential descriptor if
+    present, else ``default_region``."""
+
+    def factory(creds: Any) -> Boto3AwsClient:
+        descriptor = _normalize_credentials(creds)
+        region = descriptor.get("region", default_region)
+        return Boto3AwsClient(descriptor, region=region)
+
+    return factory

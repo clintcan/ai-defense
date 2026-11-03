@@ -17,6 +17,10 @@ from .advisories import DEMO_ADVISORIES
 from .approval.gate import ApprovalGate, ApprovalState, PersistentApprovalGate
 from .audit.log import AuditLog, AuditRecord
 from .cloud.tools import (
+    EC2_DISCOVERY_TOOL,
+    LIGHTSAIL_DISCOVERY_TOOL,
+    PATCH_BASELINE_TOOL,
+    PATCH_STATE_TOOL,
     make_ec2_discovery_tool,
     make_lightsail_discovery_tool,
     make_patch_baseline_tool,
@@ -31,7 +35,11 @@ from .demo import (
     DemoSecretsBackend,
     SimulatedSSHTransport,
 )
-from .onboarding import build_ssh_asset, make_asset_register_tool
+from .onboarding import (
+    build_ssh_asset,
+    make_asset_register_tool,
+    make_cloud_account_register_tool,
+)
 from .registry.assets import Asset, AssetRegistry, Authorization
 from .scanner.scanner import AuthenticatedScanner, HostFindings
 from .ssh.executor import SSHExecutor
@@ -80,6 +88,13 @@ class Engine:
             tool="asset.register", params=params, targets=[target],
             action_class=ActionClass.ONBOARD, reason="onboard asset"))
 
+    def onboard_cloud_account(self, **params: Any) -> ToolResult:
+        """Propose a cloud-account onboarding (cloud.register_account) intent."""
+        target = params.pop("control_plane", "control-plane")
+        return self.dispatcher.dispatch(Intent(
+            tool="cloud.register_account", params=params, targets=[target],
+            action_class=ActionClass.ONBOARD, reason="onboard cloud account"))
+
     # -- detect / plan / remediate ---------------------------------------
     def scan(self, asset_ids: list[str]) -> list[HostFindings]:
         return self.scanner.scan_hosts(asset_ids)
@@ -105,6 +120,46 @@ class Engine:
     def audit_ok(self) -> bool:
         return self.audit.verify()
 
+    # -- cloud (AWS) ------------------------------------------------------
+    def _account_credential_ref(self, account_id: str) -> str:
+        asset = self.registry.get(account_id)
+        if asset is None:
+            raise KeyError(f"cloud account not registered: {account_id}")
+        ref = (asset.attributes or {}).get("credential_ref")
+        if not ref:
+            raise KeyError(f"account {account_id} has no credential_ref")
+        return ref
+
+    def _cloud_dispatch(self, tool: str, account_id: str, action_class: ActionClass,
+                        extra: dict, reason: str) -> ToolResult:
+        params = {"account": account_id,
+                  "credential_ref": self._account_credential_ref(account_id), **extra}
+        return self.dispatcher.dispatch(Intent(
+            tool=tool, params=params, targets=[account_id],
+            action_class=action_class, reason=reason))
+
+    def cloud_discover(self, account_id: str) -> ToolResult:
+        """EC2 + Lightsail inventory for a registered account (read-only)."""
+        ec2 = self._cloud_dispatch(EC2_DISCOVERY_TOOL, account_id,
+                                   ActionClass.DISCOVERY, {}, "cloud inventory (ec2)")
+        ls = self._cloud_dispatch(LIGHTSAIL_DISCOVERY_TOOL, account_id,
+                                  ActionClass.DISCOVERY, {}, "cloud inventory (lightsail)")
+        return ec2, ls
+
+    def cloud_patch_state(self, account_id: str, instance_ids: list[str]) -> ToolResult:
+        return self._cloud_dispatch(PATCH_STATE_TOOL, account_id, ActionClass.SCAN,
+                                    {"instance_ids": list(instance_ids)},
+                                    "cloud patch compliance")
+
+    def cloud_remediate(self, account_id: str, instance_ids: list[str],
+                        baseline: str | None = None,
+                        action_class: ActionClass = ActionClass.PATCH_CANARY) -> ToolResult:
+        extra: dict = {"instance_ids": list(instance_ids)}
+        if baseline:
+            extra["baseline"] = baseline
+        return self._cloud_dispatch(PATCH_BASELINE_TOOL, account_id, action_class,
+                                    extra, "apply SSM patch baseline")
+
 
 _CONTROL_PLANE_ID = "control-plane"
 
@@ -121,6 +176,8 @@ def build_engine(
     session_factory=None,
     policy_config: dict | None = None,
     aws_client: Any = None,
+    aws_client_factory: Any = None,
+    aws_region: str | None = None,
     inspector: Any = None,
     inspector_factory: Any = None,
     transport: Any = None,
@@ -166,8 +223,14 @@ def build_engine(
     policy = PolicyEngine(policy_config)
     rate_limiter = RateLimiter.from_config(policy_config)
 
-    aws = aws_client or DemoAwsClient()
-    client_factory = lambda _creds: aws  # noqa: E731 (brevity)
+    if aws_client_factory is not None:
+        client_factory = aws_client_factory
+    elif aws_region is not None:                      # live boto3 (profile/role/keys)
+        from .cloud.aws_client import boto3_client_factory
+        client_factory = boto3_client_factory(aws_region)
+    else:                                             # simulated
+        aws = aws_client or DemoAwsClient()
+        client_factory = lambda _creds: aws  # noqa: E731 (brevity)
 
     the_transport = transport or SimulatedSSHTransport()
     conn_resolver = registry_connection_resolver(registry, clock=clock)
@@ -182,6 +245,7 @@ def build_engine(
     tools.register(make_snapshot_delete_tool(client_factory))
     tools.register(make_patch_baseline_tool(client_factory))
     tools.register(make_asset_register_tool(registry.register))   # writes through to DB
+    tools.register(make_cloud_account_register_tool(registry.register))
 
     dispatcher = Dispatcher(
         registry=tools, policy=policy, assets=registry, approvals=approvals,
@@ -211,6 +275,7 @@ def build_ssh_engine(
     allow_unknown_hosts: bool = False,
     policy_config: dict | None = None,
     advisories: list[Advisory] | None = None,
+    aws_region: str | None = None,
 ) -> Engine:
     """Engine with the REAL SSH backend: a paramiko transport, a file-backed
     vault (keys under ``key_dir``, referenced by key_ref), and a read-only SSH
@@ -236,13 +301,14 @@ def build_ssh_engine(
         secrets_backend=FileVaultBackend(key_dir),
         inspector_factory=inspector_factory,
         advisories=advisories,
+        aws_region=aws_region,
     )
 
 
-def build_demo_engine(session_factory=None) -> Engine:
+def build_demo_engine(session_factory=None, *, aws_region: str | None = None) -> Engine:
     """Back-compat wrapper: the demo engine with simulated backends (persistent
-    when a session_factory is given)."""
-    return build_engine(session_factory=session_factory)
+    when a session_factory is given; live boto3 when aws_region is set)."""
+    return build_engine(session_factory=session_factory, aws_region=aws_region)
 
 
 # Re-export for convenience.

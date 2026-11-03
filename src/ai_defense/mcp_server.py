@@ -85,6 +85,63 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {"n": {"type": "integer"}},
         },
     },
+    {
+        "name": "onboard_cloud_account",
+        "description": "Register a cloud account (e.g. AWS) so its instances can be "
+                       "managed. Approval-gated; the AWS credential must already be in "
+                       "the vault, referenced by credential_ref (never the keys here).",
+        "inputSchema": {
+            "type": "object",
+            "required": ["account_id", "credential_ref", "owner", "environment",
+                         "granted_by"],
+            "properties": {
+                "account_id": {"type": "string"},
+                "credential_ref": {"type": "string"},
+                "owner": {"type": "string"},
+                "environment": {"type": "string"},
+                "granted_by": {"type": "string"},
+                "provider": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "cloud_discover",
+        "description": "List EC2 and Lightsail instances in a registered cloud "
+                       "account (read-only).",
+        "inputSchema": {
+            "type": "object",
+            "required": ["account_id"],
+            "properties": {"account_id": {"type": "string"}},
+        },
+    },
+    {
+        "name": "cloud_patch_state",
+        "description": "SSM patch compliance for the given EC2 instances in an account "
+                       "(read-only); flags the non-compliant ones.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["account_id", "instance_ids"],
+            "properties": {
+                "account_id": {"type": "string"},
+                "instance_ids": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "cloud_remediate",
+        "description": "Apply an SSM patch baseline to EC2 instances (scans first, "
+                       "then installs). Returns pending with a change_set_id until a "
+                       "human approves; re-call after approval to apply.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["account_id", "instance_ids"],
+            "properties": {
+                "account_id": {"type": "string"},
+                "instance_ids": {"type": "array", "items": {"type": "string"}},
+                "baseline": {"type": "string"},
+            },
+        },
+    },
 ]
 
 
@@ -149,9 +206,39 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                                  "reason": r.payload.get("reason"),
                                  "ts": r.ts.isoformat()} for r in recs]}
 
+        if name == "onboard_cloud_account":
+            res = engine.onboard_cloud_account(**args)
+            return _tool_result_json(res)
+
+        if name == "cloud_discover":
+            ec2, ls = engine.cloud_discover(args["account_id"])
+            instances = []
+            for r in (ec2, ls):
+                if r.ok:
+                    instances += r.data.get("instances", [])
+            return {"account_id": args["account_id"], "instances": instances,
+                    "errors": [r.summary for r in (ec2, ls) if not r.ok]}
+
+        if name == "cloud_patch_state":
+            res = engine.cloud_patch_state(args["account_id"], list(args["instance_ids"]))
+            return _tool_result_json(res)
+
+        if name == "cloud_remediate":
+            res = engine.cloud_remediate(args["account_id"], list(args["instance_ids"]),
+                                         baseline=args.get("baseline"))
+            out = _tool_result_json(res)
+            if res.data.get("approval_state") == "pending":
+                out["change_set_id"] = res.data.get("change_set_id")
+                out["next"] = "ask the operator to approve, then call cloud_remediate again"
+            return out
+
         return {"error": f"unknown tool: {name}"}
     except KeyError as exc:
         return {"error": f"missing argument: {exc}"}
+
+
+def _tool_result_json(res) -> dict:
+    return {"ok": res.ok, "summary": res.summary, "data": res.data}
 
 
 def _remediate(engine: Engine, asset_id: str, package: str, snapshot: bool) -> dict:
@@ -179,7 +266,8 @@ _DESCRIPTIONS = {t["name"]: t["description"] for t in TOOLS}
 
 
 def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None = None,
-                known_hosts: str | None = None, allow_unknown_hosts: bool = False) -> Engine:
+                known_hosts: str | None = None, allow_unknown_hosts: bool = False,
+                aws_region: str | None = None) -> Engine:
     if engine is not None:
         return engine
     sf = None
@@ -190,8 +278,9 @@ def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None =
         from .composition import build_ssh_engine
         return build_ssh_engine(key_dir=ssh_keys, session_factory=sf,
                                 known_hosts=known_hosts,
-                                allow_unknown_hosts=allow_unknown_hosts)
-    return build_demo_engine(session_factory=sf)
+                                allow_unknown_hosts=allow_unknown_hosts,
+                                aws_region=aws_region)
+    return build_demo_engine(session_factory=sf, aws_region=aws_region)
 
 
 def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/import-gated test
@@ -227,19 +316,41 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def audit_tail(n: int = 20) -> dict:
         return handle_call(engine, "audit_tail", {"n": n})
 
-    for fn in (list_assets, scan, plan, remediate, approve_change, audit_tail):
+    def onboard_cloud_account(account_id: str, credential_ref: str, owner: str,
+                              environment: str, granted_by: str,
+                              provider: str = "aws") -> dict:
+        return handle_call(engine, "onboard_cloud_account", {
+            "account_id": account_id, "credential_ref": credential_ref, "owner": owner,
+            "environment": environment, "granted_by": granted_by, "provider": provider})
+
+    def cloud_discover(account_id: str) -> dict:
+        return handle_call(engine, "cloud_discover", {"account_id": account_id})
+
+    def cloud_patch_state(account_id: str, instance_ids: list[str]) -> dict:
+        return handle_call(engine, "cloud_patch_state",
+                           {"account_id": account_id, "instance_ids": instance_ids})
+
+    def cloud_remediate(account_id: str, instance_ids: list[str],
+                        baseline: str | None = None) -> dict:
+        return handle_call(engine, "cloud_remediate", {
+            "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
+
+    for fn in (list_assets, scan, plan, remediate, approve_change, audit_tail,
+               onboard_cloud_account, cloud_discover, cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 
 
 def serve(engine: Engine | None = None, *, db: str | None = None,
           ssh_keys: str | None = None, known_hosts: str | None = None,
-          allow_unknown_hosts: bool = False) -> None:  # pragma: no cover
+          allow_unknown_hosts: bool = False,
+          aws_region: str | None = None) -> None:  # pragma: no cover
     """Run the MCP server over stdio. Requires the ``mcp`` extra (>=2).
 
     With ``db`` the engine is durable and shares assets/approvals with the
-    operator CLI. With ``ssh_keys`` (a key directory) it uses the real SSH
-    backend (paramiko) so scans/patches run against actual hosts."""
+    operator CLI. With ``ssh_keys`` it uses the real SSH backend (paramiko). With
+    ``aws_region`` it uses live boto3 for the cloud tools (CLI-profile creds
+    resolved from the vault by credential_ref)."""
     eng = _engine_for(engine, db, ssh_keys=ssh_keys, known_hosts=known_hosts,
-                      allow_unknown_hosts=allow_unknown_hosts)
+                      allow_unknown_hosts=allow_unknown_hosts, aws_region=aws_region)
     build_mcp_server(eng).run("stdio")

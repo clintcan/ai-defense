@@ -95,9 +95,14 @@ Working vertical slice. Implemented and tested end to end:
   `ai-defense mcp --ssh-keys <dir> [--known-hosts <file>]`. Needs the `ssh` extra
   (`pip install -e ".[ssh]"`).
 
-Still stubbed: live boto3 and OSV/NVD advisory clients, and other cloud
-providers (GCP/Azure) — the seams are in place. Run `pytest` and
-`ruff check src tests`.
+- **AWS in chat (live)** — `--aws-region` makes the cloud tools use real boto3
+  (CLI-profile auth; creds resolved from the vault by `credential_ref`, no keys
+  stored). Cloud accounts are onboarded (approval-gated) and managed from chat
+  via `onboard_cloud_account`, `cloud_discover` (EC2 + Lightsail),
+  `cloud_patch_state`, and `cloud_remediate` (SSM baseline, approval-gated).
+
+Still stubbed: OSV/NVD advisory clients and other cloud providers (GCP/Azure) —
+the seams are in place. Run `pytest` and `ruff check src tests`.
 
 ## Install & run
 

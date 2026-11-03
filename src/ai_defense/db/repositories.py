@@ -57,6 +57,7 @@ class AssetRepository:
             row.conn_port = conn.port if conn else None
             row.conn_user = conn.user if conn else None
             row.conn_key_ref = conn.key_ref if conn else None
+            row.attributes = dict(asset.attributes or {})
             a = asset.authorization
             row.authorizations.append(AuthorizationRow(
                 attestation_sig=a.attestation_sig, granted_by=a.granted_by,
@@ -120,6 +121,7 @@ def _to_asset(row: AssetRow) -> Asset:
             granted_at=latest.granted_at, expires_at=latest.expires_at,
         ),
         connection=connection,
+        attributes=dict(row.attributes or {}),
     )
 
 

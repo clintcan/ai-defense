@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -40,6 +40,9 @@ class Asset:
     environment: str          # e.g. "web-prod"
     authorization: Authorization
     connection: ConnectionInfo | None = None   # for ssh-host assets
+    # free-form per-kind metadata, e.g. {"credential_ref": "aws/prod"} for a
+    # cloud-account asset. Never holds secret values, only references.
+    attributes: dict = field(default_factory=dict)
 
 
 class AssetRegistry:

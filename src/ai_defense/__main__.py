@@ -26,7 +26,7 @@ def _run_demo() -> int:
 def _run_mcp(args) -> int:
     from .mcp_server import serve
     serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
-          allow_unknown_hosts=args.allow_unknown_hosts)
+          allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region)
     return 0
 
 
@@ -70,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
     p_mcp.add_argument("--known-hosts", default=None, help="known_hosts file for host-key checks")
     p_mcp.add_argument("--allow-unknown-hosts", action="store_true",
                        help="accept unknown SSH host keys (trust on first use; less safe)")
+    p_mcp.add_argument("--aws-region", default=None,
+                       help="default AWS region -> use live boto3 for cloud tools "
+                            "(needs 'aws' extra; creds resolved from the vault)")
 
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)

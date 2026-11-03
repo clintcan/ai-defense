@@ -19,8 +19,10 @@ def _engine_with_host():
 
 
 def test_manifest_shape():
-    assert set(tool_names()) == {
-        "list_assets", "scan", "plan", "remediate", "approve_change", "audit_tail"}
+    assert {"list_assets", "scan", "plan", "remediate", "approve_change",
+            "audit_tail"} <= set(tool_names())            # host tools present
+    assert {"onboard_cloud_account", "cloud_discover", "cloud_patch_state",
+            "cloud_remediate"} <= set(tool_names())       # cloud tools present
     for t in TOOLS:
         assert t["inputSchema"]["type"] == "object"       # valid JSON-schema stub
 

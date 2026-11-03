@@ -73,6 +73,9 @@ class AssetRow(Base):
     conn_user: Mapped[str | None] = mapped_column(String(64), nullable=True)
     conn_key_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
 
+    # per-kind metadata (references only, never secrets), e.g. cloud credential_ref
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict)
+
     authorizations: Mapped[list[AuthorizationRow]] = relationship(
         back_populates="asset", cascade="all, delete-orphan",
     )

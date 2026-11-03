@@ -23,9 +23,10 @@ def _run_demo() -> int:
     return 0
 
 
-def _run_mcp(db: str | None) -> int:
+def _run_mcp(args) -> int:
     from .mcp_server import serve
-    serve(db=db)
+    serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
+          allow_unknown_hosts=args.allow_unknown_hosts)
     return 0
 
 
@@ -64,6 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     p_mcp = sub.add_parser("mcp", help="run the MCP server over stdio (needs the 'mcp' extra)")
     p_mcp.add_argument("--db", default=None,
                        help="DB URL for a durable engine shared with the operator CLI")
+    p_mcp.add_argument("--ssh-keys", default=None,
+                       help="key directory -> use the real SSH backend (needs 'ssh' extra)")
+    p_mcp.add_argument("--known-hosts", default=None, help="known_hosts file for host-key checks")
+    p_mcp.add_argument("--allow-unknown-hosts", action="store_true",
+                       help="accept unknown SSH host keys (trust on first use; less safe)")
 
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)
@@ -78,7 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "demo":
         return _run_demo()
     if args.command == "mcp":
-        return _run_mcp(args.db)
+        return _run_mcp(args)
     if args.command == "pending":
         return _run_pending(args.db)
     if args.command == "approve":

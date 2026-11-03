@@ -79,3 +79,56 @@ def test_full_durable_flow_remediates_cli_onboarded_host():
     eng.approve(pending.patch.data["change_set_id"])
     assert eng.remediate(item, snapshot=False).status == "patched"
     assert eng.audit_ok()
+
+
+def test_build_ssh_engine_uses_real_backends_wiring(tmp_path, monkeypatch):
+    # build_ssh_engine should wire a paramiko transport + file vault + SSH
+    # inspector. We verify the wiring (file vault + inspector over a transport)
+    # by injecting a fake paramiko and a key file, then scanning an onboarded
+    # host end to end.
+    import sys
+    import types
+
+    from ai_defense.composition import build_ssh_engine
+    from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
+
+    # minimal fake paramiko whose exec_command returns a dpkg inventory
+    class _Chan:
+        def recv_exit_status(self): return 0
+    class _S:
+        def __init__(self, d, c=None):
+            self._d = d
+            self.channel = c
+        def read(self): return self._d
+    class _Client:
+        def load_host_keys(self, p): pass
+        def load_system_host_keys(self): pass
+        def set_missing_host_key_policy(self, p): pass
+        def connect(self, **k): pass
+        def exec_command(self, command, timeout=None, get_pty=False):
+            return (None, _S(b"openssl 3.0.5\n", _Chan()), _S(b""))
+        def close(self): pass
+    pm = types.ModuleType("paramiko")
+    pm.SSHException = type("SSHException",(Exception,),{})
+    pm.Ed25519Key = type("K",(),{"from_private_key": classmethod(lambda c,*a,**k: object())})
+    pm.RSAKey = pm.Ed25519Key
+    pm.SSHClient = _Client
+    pm.AutoAddPolicy = type("A",(),{})
+    pm.RejectPolicy = type("R",(),{})
+    monkeypatch.setitem(sys.modules, "paramiko", pm)
+
+    # key file in the vault dir
+    (tmp_path / "ssh-key").mkdir()
+    (tmp_path / "ssh-key" / "vps-real-01").write_text("KEYDATA")
+
+    sf = init_db()
+    eng = build_ssh_engine(key_dir=str(tmp_path), session_factory=sf,
+                           allow_unknown_hosts=True)
+    now = datetime.now(UTC)
+    eng.registry.register(Asset(
+        "vps-real-01", "ssh-host", "ops", "prod",
+        Authorization("sig","op",now-timedelta(minutes=1),now+timedelta(days=90)),
+        connection=ConnectionInfo(host="203.0.113.70", key_ref="ssh-key/vps-real-01")))
+
+    inv = eng.scan(["vps-real-01"])
+    assert inv[0].installed_packages == {"openssl": "3.0.5"}   # came over (fake) SSH

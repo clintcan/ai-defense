@@ -88,9 +88,15 @@ Working vertical slice. Implemented and tested end to end:
   in the registry (re-checked at resolve time), so a command can never be aimed
   at an arbitrary host or key, and the planner never handles connection details.
 
-Still stubbed: other AWS services and cloud providers (GCP/Azure), and real
-advisory-feed / host-inspector / boto3 clients (the seams are in place;
-implementations are injected in tests). Run `pytest` (112 tests) and
+- **Real SSH backend** — `composition.build_ssh_engine(key_dir=...)` wires a
+  paramiko transport (host-key verification on by default), a file-backed vault
+  (keys under `key_dir`, referenced by `key_ref`, never in the DB), and a
+  read-only SSH host inspector (`dpkg-query`). Run it behind the chat server with
+  `ai-defense mcp --ssh-keys <dir> [--known-hosts <file>]`. Needs the `ssh` extra
+  (`pip install -e ".[ssh]"`).
+
+Still stubbed: live boto3 and OSV/NVD advisory clients, and other cloud
+providers (GCP/Azure) — the seams are in place. Run `pytest` and
 `ruff check src tests`.
 
 ## Install & run

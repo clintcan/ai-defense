@@ -119,9 +119,32 @@ hash-chained trail (`audit_tail`).
 - Credentials never pass through Claude; the SSH key is resolved from the vault
   by `key_ref` at execution time and redacted from results and the audit log.
 
-## Note on backends
+## Real SSH mode (patch actual hosts)
 
-This server runs on **simulated** vault/SSH/AWS backends (nothing touches real
-hosts yet). It's safe to explore end to end. Real backends (paramiko SSH, live
-boto3, a real vault) are injected via `composition.build_engine(...)` and are
-the next build step.
+By default the server uses **simulated** backends (nothing touches real hosts).
+To act on real machines over SSH, add `--ssh-keys` pointing at a key directory
+(install the extra first: `pip install -e ".[ssh]"`):
+
+```json
+{
+  "mcpServers": {
+    "ai-defense": {
+      "command": "C:\\path\\to\\ai_defense\\.venv\\Scripts\\ai-defense.exe",
+      "args": ["mcp",
+               "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db",
+               "--ssh-keys", "C:\\path\\to\\ai_defense\\keys",
+               "--known-hosts", "C:\\Users\\you\\.ssh\\known_hosts"]
+    }
+  }
+}
+```
+
+- Put each private key at `<keys>/<key_ref>` — e.g. `key_ref` `ssh-key/vps-01`
+  → file `<keys>/ssh-key/vps-01`. Keep that directory owner-only and out of git.
+- Host-key verification is **on**: the target must be in `--known-hosts`. Add
+  `--allow-unknown-hosts` only for trust-on-first-use (less safe).
+- Cloud (AWS) tools remain simulated in this mode; a live AWS backend is a
+  separate step.
+
+Then onboard a host whose `key_ref` matches a key file, and `scan` / `remediate`
+run real `dpkg-query` / `apt-get` over SSH (dry-run first, approval-gated).

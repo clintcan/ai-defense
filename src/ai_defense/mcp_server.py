@@ -178,13 +178,20 @@ def _remediate(engine: Engine, asset_id: str, package: str, snapshot: bool) -> d
 _DESCRIPTIONS = {t["name"]: t["description"] for t in TOOLS}
 
 
-def _engine_for(engine: Engine | None, db: str | None) -> Engine:
+def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None = None,
+                known_hosts: str | None = None, allow_unknown_hosts: bool = False) -> Engine:
     if engine is not None:
         return engine
+    sf = None
     if db is not None:
         from .db import init_db
-        return build_demo_engine(session_factory=init_db(db))
-    return build_demo_engine()
+        sf = init_db(db)
+    if ssh_keys is not None:
+        from .composition import build_ssh_engine
+        return build_ssh_engine(key_dir=ssh_keys, session_factory=sf,
+                                known_hosts=known_hosts,
+                                allow_unknown_hosts=allow_unknown_hosts)
+    return build_demo_engine(session_factory=sf)
 
 
 def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/import-gated test
@@ -225,9 +232,14 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     return server
 
 
-def serve(engine: Engine | None = None, *, db: str | None = None) -> None:  # pragma: no cover
+def serve(engine: Engine | None = None, *, db: str | None = None,
+          ssh_keys: str | None = None, known_hosts: str | None = None,
+          allow_unknown_hosts: bool = False) -> None:  # pragma: no cover
     """Run the MCP server over stdio. Requires the ``mcp`` extra (>=2).
 
-    With ``db`` (a DB URL) the engine is durable and shares assets/approvals with
-    the operator CLI, so approvals granted in the terminal are honoured here."""
-    build_mcp_server(_engine_for(engine, db)).run("stdio")
+    With ``db`` the engine is durable and shares assets/approvals with the
+    operator CLI. With ``ssh_keys`` (a key directory) it uses the real SSH
+    backend (paramiko) so scans/patches run against actual hosts."""
+    eng = _engine_for(engine, db, ssh_keys=ssh_keys, known_hosts=known_hosts,
+                      allow_unknown_hosts=allow_unknown_hosts)
+    build_mcp_server(eng).run("stdio")

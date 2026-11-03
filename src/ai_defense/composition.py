@@ -122,6 +122,7 @@ def build_engine(
     policy_config: dict | None = None,
     aws_client: Any = None,
     inspector: Any = None,
+    inspector_factory: Any = None,
     transport: Any = None,
     secrets_backend: Any = None,
     advisories: list[Advisory] | None = None,
@@ -168,10 +169,12 @@ def build_engine(
     aws = aws_client or DemoAwsClient()
     client_factory = lambda _creds: aws  # noqa: E731 (brevity)
 
+    the_transport = transport or SimulatedSSHTransport()
+    conn_resolver = registry_connection_resolver(registry, clock=clock)
+
     tools = ToolRegistry()
     tools.register(make_security_update_tool(
-        SSHExecutor(transport or SimulatedSSHTransport()),
-        registry_connection_resolver(registry, clock=clock)))
+        SSHExecutor(the_transport), conn_resolver))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))
@@ -185,13 +188,54 @@ def build_engine(
         vault=vault, audit=audit, clock=clock, rate_limiter=rate_limiter,
     )
 
+    if inspector_factory is not None:
+        host_inspector = inspector_factory(conn_resolver, vault, the_transport)
+    else:
+        host_inspector = inspector or DemoInspector()
+
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
-        scanner=AuthenticatedScanner(inspector or DemoInspector()),
+        scanner=AuthenticatedScanner(host_inspector),
         planner=RemediationPlanner(),
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
         feed=StaticAdvisoryFeed(advisories if advisories is not None else DEMO_ADVISORIES),
         clock=clock,
+    )
+
+
+def build_ssh_engine(
+    *,
+    key_dir: str,
+    session_factory=None,
+    known_hosts: str | None = None,
+    allow_unknown_hosts: bool = False,
+    policy_config: dict | None = None,
+    advisories: list[Advisory] | None = None,
+) -> Engine:
+    """Engine with the REAL SSH backend: a paramiko transport, a file-backed
+    vault (keys under ``key_dir``, referenced by key_ref), and a read-only SSH
+    host inspector. Cloud tools remain simulated (the AWS backend is separate).
+
+    Requires the ``ssh`` extra (paramiko). Host-key verification is on unless
+    ``allow_unknown_hosts`` is set.
+    """
+    from .scanner.ssh_inspector import SSHHostInspector
+    from .ssh.paramiko_transport import ParamikoTransport
+    from .vault.backends import FileVaultBackend
+
+    transport = ParamikoTransport(known_hosts=known_hosts,
+                                  allow_unknown_hosts=allow_unknown_hosts)
+
+    def inspector_factory(conn_resolver, vault, tport):
+        return SSHHostInspector(conn_resolver, vault, tport)
+
+    return build_engine(
+        session_factory=session_factory,
+        policy_config=policy_config,
+        transport=transport,
+        secrets_backend=FileVaultBackend(key_dir),
+        inspector_factory=inspector_factory,
+        advisories=advisories,
     )
 
 
@@ -202,4 +246,5 @@ def build_demo_engine(session_factory=None) -> Engine:
 
 
 # Re-export for convenience.
-__all__ = ["Engine", "build_engine", "build_demo_engine", "build_ssh_asset"]
+__all__ = ["Engine", "build_engine", "build_ssh_engine", "build_demo_engine",
+           "build_ssh_asset"]

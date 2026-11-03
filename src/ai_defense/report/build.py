@@ -70,6 +70,7 @@ def build_report(
             upgrade_target=pf.target_version if pf else None,
             upgrade_path=list(pf.path) if pf else [],
             findings=[_finding(it) for it in items_by_asset.get(aid, [])],
+            issues=list(hf.misconfigurations) if hf else [],
         ))
 
     return Report(provenance=provenance, assets=assets, audit_verified=audit_verified)

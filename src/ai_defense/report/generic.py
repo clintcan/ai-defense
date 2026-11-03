@@ -62,6 +62,7 @@ def to_generic(report: Report) -> dict:
             "by_severity": report.counts_by_severity(),
             "kev": len(report.kev_findings),
             "eol_assets": [a.asset_id for a in report.eol_assets],
+            "failed_assets": [a.asset_id for a in report.failed_assets],
         },
         "assets": [
             {
@@ -70,6 +71,8 @@ def to_generic(report: Report) -> dict:
                 "support_status": a.support_status,
                 "upgrade": {"verdict": a.upgrade_verdict,
                             "target": a.upgrade_target, "path": a.upgrade_path},
+                "scanned": a.scanned,
+                "issues": a.issues,
                 "findings": [_finding(f) for f in a.findings],
             }
             for a in report.assets

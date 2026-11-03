@@ -53,7 +53,11 @@ class AuthenticatedScanner:
         )
 
     def scan_host(self, asset_id: str) -> HostFindings:
-        return self._findings(asset_id, self._inspector.collect(asset_id))
+        try:
+            raw = self._inspector.collect(asset_id)
+        except Exception as exc:  # noqa: BLE001 - fail safe: one host must not abort a batch
+            return self._failed(asset_id, exc)
+        return self._findings(asset_id, raw)
 
     def scan_hosts(self, asset_ids: list[str]) -> list[HostFindings]:
         return [self.scan_host(a) for a in asset_ids]
@@ -63,9 +67,26 @@ class AuthenticatedScanner:
         probes (``collect_upgrade_state``) when the inspector supports them, so
         the preflight planner can judge readiness. Still strictly non-mutating.
         The extra probes stay off the normal scan path so routine scans stay
-        lean."""
-        raw = dict(self._inspector.collect(asset_id))
+        lean.
+
+        A host that cannot be reached/scanned yields a findings record flagged
+        ``scan failed`` rather than raising, so one bad host never aborts a fleet
+        sweep. The probes are best-effort on top of a successful collect."""
+        try:
+            raw = dict(self._inspector.collect(asset_id))
+        except Exception as exc:  # noqa: BLE001 - fail safe
+            return self._failed(asset_id, exc)
         probe = getattr(self._inspector, "collect_upgrade_state", None)
         if callable(probe):
-            raw["system_state"] = {**raw.get("system_state", {}), **(probe(asset_id) or {})}
+            try:
+                raw["system_state"] = {**raw.get("system_state", {}), **(probe(asset_id) or {})}
+            except Exception:  # noqa: BLE001 - probes are best-effort, never fatal
+                pass
         return self._findings(asset_id, raw)
+
+    @staticmethod
+    def _failed(asset_id: str, exc: Exception) -> HostFindings:
+        # Record only the exception type, never its message — it can carry host
+        # or path detail that must not leak into a model-visible result.
+        return HostFindings(asset_id=asset_id,
+                            misconfigurations=[f"scan failed: {type(exc).__name__}"])

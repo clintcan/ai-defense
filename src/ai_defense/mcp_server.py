@@ -261,6 +261,7 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                     "by_kind": report.counts_by_kind(),
                     "by_severity": report.counts_by_severity(),
                     "eol_assets": [a.asset_id for a in report.eol_assets],
+                    "failed_assets": [a.asset_id for a in report.failed_assets],
                 },
             }
 

@@ -155,6 +155,42 @@ def test_engine_report_on_demo(tmp_path):
     assert all(os.path.exists(p) for p in paths.values())
 
 
+class _ExplodingInspector:
+    """collect() raises for one host (unreachable), succeeds for others."""
+
+    def collect(self, asset_id):
+        if asset_id == "dead":
+            raise OSError("connection refused")
+        return {"installed_packages": {"openssl": "3.0.5"},
+                "os_release": {"ID": "ubuntu", "VERSION_ID": "22.04"}}
+
+
+def test_fleet_scan_tolerates_a_failing_host():
+    from ai_defense.scanner.scanner import AuthenticatedScanner
+    scanner = AuthenticatedScanner(_ExplodingInspector())
+    ok = scanner.scan_host_for_upgrade("live")
+    dead = scanner.scan_host_for_upgrade("dead")        # must not raise
+    assert ok.installed_packages == {"openssl": "3.0.5"}
+    assert dead.installed_packages == {}
+    assert dead.misconfigurations == ["scan failed: OSError"]   # type only, no message
+
+
+def test_report_marks_failed_hosts():
+    # one scanned asset, one failed -> report counts and lists the failure
+    prov = ReportProvenance(generated_at=datetime(2026, 11, 4), scope=["ok", "dead"],
+                            advisory_source="osv.dev", kev_enabled=True)
+    ok = ReportAsset(asset_id="ok", host="1.1.1.1", os="ubuntu 22.04 (jammy)")
+    dead = ReportAsset(asset_id="dead", host="2.2.2.2",
+                       issues=["scan failed: OSError"])
+    report = Report(provenance=prov, assets=[ok, dead])
+    assert [a.asset_id for a in report.failed_assets] == ["dead"]
+    md = executive_summary_md(report)
+    assert "1 host(s) could not be scanned" in md and "dead" in md
+    doc = to_generic(report)
+    assert doc["summary"]["failed_assets"] == ["dead"]
+    assert doc["assets"][1]["scanned"] is False
+
+
 def test_engine_report_threads_registry_host():
     eng = build_demo_engine()
     now = datetime.now(UTC)

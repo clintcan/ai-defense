@@ -39,8 +39,15 @@ def executive_summary_md(report: Report) -> str:
     out.append("")
     out.append(f"_{_provenance_line(report)}_")
     out.append("")
-    out.append(f"**{len(report.assets)}** asset(s) assessed · "
+    failed = report.failed_assets
+    scanned_n = len(report.assets) - len(failed)
+    out.append(f"**{scanned_n}** of **{len(report.assets)}** asset(s) scanned · "
                f"**{len(report.all_findings)}** open finding(s).")
+    if failed:
+        out.append("")
+        out.append(f"> ⚠ **{len(failed)} host(s) could not be scanned** (not counted above): "
+                   + ", ".join(f"{a.asset_id}" + (f" ({a.host})" if a.host else "")
+                               for a in failed) + ".")
     out.append("")
 
     # Headline risk.
@@ -145,8 +152,12 @@ def _asset_section(a: ReportAsset) -> list[str]:
         out.append(line)
         out.append("")
 
+    if a.issues:
+        out.append("**Scan issues:** " + "; ".join(a.issues))
+        out.append("")
+
     if not a.findings:
-        out.append("_No open findings._")
+        out.append("_No findings scanned._" if not a.scanned else "_No open findings._")
         out.append("")
         return out
 

@@ -68,6 +68,11 @@ class ReportAsset:
     upgrade_target: str | None = None     # next release, e.g. "20.04"
     upgrade_path: list[str] = field(default_factory=list)
     findings: list[ReportFinding] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)   # scan problems (e.g. "scan failed: ...")
+
+    @property
+    def scanned(self) -> bool:
+        return not any(i.startswith("scan failed") for i in self.issues)
 
 
 @dataclass(frozen=True)
@@ -112,3 +117,7 @@ class Report:
     @property
     def eol_assets(self) -> list[ReportAsset]:
         return [a for a in self.assets if a.support_status in ("esm", "eol")]
+
+    @property
+    def failed_assets(self) -> list[ReportAsset]:
+        return [a for a in self.assets if not a.scanned]

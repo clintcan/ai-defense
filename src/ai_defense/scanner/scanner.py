@@ -37,6 +37,10 @@ class AuthenticatedScanner:
     def __init__(self, inspector: HostInspector) -> None:
         self._inspector = inspector
 
+    @property
+    def inspector(self) -> HostInspector:
+        return self._inspector
+
     def _findings(self, asset_id: str, raw: dict) -> HostFindings:
         return HostFindings(
             asset_id=asset_id,

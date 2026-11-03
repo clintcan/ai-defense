@@ -14,6 +14,7 @@ lazily so the package works without that optional dependency.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .composition import Engine, build_demo_engine
@@ -58,6 +59,24 @@ TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {"asset_ids": {"type": "array", "items": {"type": "string"}}},
+            "required": ["asset_ids"],
+        },
+    },
+    {
+        "name": "report",
+        "description": "Generate vulnerability reports for the given assets and write them "
+                       "to local files: an executive summary (Markdown), a technical report "
+                       "(Markdown), a generic findings JSON, and a DefectDojo Generic "
+                       "Findings Import JSON. Read-only; returns the written file paths and "
+                       "a summary (never the full content). Files stay local.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_ids": {"type": "array", "items": {"type": "string"}},
+                "out_dir": {"type": "string",
+                            "description": "directory to write into (default: "
+                                           "./reports/<timestamp>)"},
+            },
             "required": ["asset_ids"],
         },
     },
@@ -200,6 +219,8 @@ def _report_json(r: OsUpgradeReport) -> dict:
 def _item_json(it: RemediationItem) -> dict:
     return {"cve_id": it.cve_id, "asset_id": it.asset_id, "package": it.package,
             "kind": it.kind.value, "priority": it.priority,
+            "cvss": it.cvss, "kev": it.kev,
+            "installed_version": it.installed_version, "fixed_version": it.fixed_version,
             "requires_human": it.requires_human, "note": it.note,
             "tracking": it.tracking}
 
@@ -226,6 +247,22 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
         if name == "upgrade_preflight":
             reports = engine.upgrade_preflight(list(args["asset_ids"]))
             return {"reports": [_report_json(r) for r in reports]}
+
+        if name == "report":
+            report, paths = engine.report(list(args["asset_ids"]),
+                                          out_dir=args.get("out_dir"))
+            return {
+                "out_dir": os.path.dirname(paths["generic_json"]),
+                "files": paths,
+                "summary": {
+                    "assets": len(report.assets),
+                    "findings": len(report.all_findings),
+                    "kev": len(report.kev_findings),
+                    "by_kind": report.counts_by_kind(),
+                    "by_severity": report.counts_by_severity(),
+                    "eol_assets": [a.asset_id for a in report.eol_assets],
+                },
+            }
 
         if name == "remediate":
             return _remediate(engine, args["asset_id"], args["package"],
@@ -356,6 +393,10 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def upgrade_preflight(asset_ids: list[str]) -> dict:
         return handle_call(engine, "upgrade_preflight", {"asset_ids": asset_ids})
 
+    def report(asset_ids: list[str], out_dir: str | None = None) -> dict:
+        return handle_call(engine, "report",
+                           {"asset_ids": asset_ids, "out_dir": out_dir})
+
     def remediate(asset_id: str, package: str, snapshot: bool = False) -> dict:
         return handle_call(engine, "remediate",
                            {"asset_id": asset_id, "package": package, "snapshot": snapshot})
@@ -389,9 +430,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
         return handle_call(engine, "cloud_remediate", {
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
-    for fn in (list_assets, scan, plan, upgrade_preflight, remediate, approve_change,
-               audit_tail, onboard_cloud_account, cloud_regions, cloud_discover,
-               cloud_patch_state, cloud_remediate):
+    for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate,
+               approve_change, audit_tail, onboard_cloud_account, cloud_regions,
+               cloud_discover, cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

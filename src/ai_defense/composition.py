@@ -8,6 +8,7 @@ audit store) — the wiring is the same.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -43,6 +44,8 @@ from .onboarding import (
     make_cloud_account_register_tool,
 )
 from .registry.assets import Asset, AssetRegistry, Authorization
+from .report import ReportProvenance, build_report, write_report
+from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
 from .ssh.executor import SSHExecutor
 from .ssh.tools import make_security_update_tool, registry_connection_resolver
@@ -117,6 +120,51 @@ class Engine:
         today = self.clock()
         return [self.preflighter.assess(self.scanner.scan_host_for_upgrade(a), today)
                 for a in asset_ids]
+
+    # -- reporting / export ----------------------------------------------
+    def build_report(self, asset_ids: list[str], *,
+                     include_preflight: bool = True) -> Report:
+        """Scan + plan (+ preflight), correlated into one read-only report model.
+
+        One authenticated scan per host feeds both the vuln plan and the upgrade
+        preflight, so a report is a single consistent snapshot."""
+        inv = [self.scanner.scan_host_for_upgrade(a) for a in asset_ids]
+        plan = self.planner.plan(self.feed.for_inventory(inv), inv)
+        today = self.clock()
+        preflights = ([self.preflighter.assess(f, today) for f in inv]
+                      if include_preflight else [])
+        return build_report(inv, plan, preflights, self._report_provenance(asset_ids),
+                            audit_verified=self.audit_ok())
+
+    def report(self, asset_ids: list[str], *, out_dir: str | None = None,
+               include_preflight: bool = True) -> tuple[Report, dict[str, str]]:
+        """Build the report and write all four deliverables to local files.
+
+        With ``out_dir`` the files are written there; otherwise a timestamped
+        directory under ``./reports``. Returns the report model and the written
+        file paths. Local-only — a fleet vulnerability inventory never leaves the
+        operator's infrastructure."""
+        report = self.build_report(asset_ids, include_preflight=include_preflight)
+        if out_dir is None:
+            stamp = report.provenance.generated_at.strftime("%Y%m%dT%H%M%SZ")
+            out_dir = os.path.join(os.getcwd(), "reports", stamp)
+        return report, write_report(report, out_dir)
+
+    def _report_provenance(self, scope: list[str]) -> ReportProvenance:
+        from .scanner.ssh_inspector import SSHHostInspector
+        from .vuln.kev import KevEnrichedFeed
+        from .vuln.osv import OsvFeed
+
+        feed = self.feed
+        kev = isinstance(feed, KevEnrichedFeed)
+        inner = getattr(feed, "_inner", feed)
+        source = "osv.dev" if isinstance(inner, OsvFeed) else type(inner).__name__
+        scan_mode = ("authenticated"
+                     if isinstance(self.scanner.inspector, SSHHostInspector)
+                     else "simulated")
+        return ReportProvenance(generated_at=self.clock(), scope=list(scope),
+                                advisory_source=source, kev_enabled=kev,
+                                scan_mode=scan_mode)
 
     def remediate(self, item: RemediationItem, *, snapshot: bool | None = None,
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:

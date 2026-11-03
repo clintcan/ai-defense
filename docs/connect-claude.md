@@ -1,7 +1,9 @@
 # Connecting AI Defense to Claude (MCP)
 
-The MCP server exposes six tools — `list_assets`, `scan`, `plan`, `remediate`,
-`approve_change`, `audit_tail` — that Claude can call in plain language. Every
+The MCP server exposes a focused set of tools Claude can call in plain language:
+`list_assets`, `scan`, `plan`, `upgrade_preflight` (read-only OS-upgrade
+eligibility), `report` (write Markdown + DefectDojo/generic JSON to local files),
+`remediate`, `approve_change`, `audit_tail`, plus the cloud tools (below). Every
 call still goes through the dispatcher, so policy, authorization, the approval
 gate, rate limits, redaction, and the audit log all apply.
 

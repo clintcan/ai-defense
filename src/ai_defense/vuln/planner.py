@@ -40,6 +40,10 @@ class RemediationItem:
     requires_human: bool
     intent: Intent | None = None      # present for auto-actionable patch items
     tracking: str | None = None       # follow-up to apply the real patch later
+    cvss: float | None = None         # carried for reporting/export
+    kev: bool = False                 # CISA known-exploited
+    installed_version: str | None = None
+    fixed_version: str | None = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -81,6 +85,9 @@ class RemediationPlanner:
     def _item(self, f: VulnFinding) -> RemediationItem:
         adv = f.advisory
         prio = _priority(adv, f.patch_available)
+        common = dict(cvss=adv.cvss, kev=adv.kev,
+                      installed_version=f.installed_version,
+                      fixed_version=f.fixed_version)
 
         if f.patch_available:
             intent = Intent(
@@ -96,7 +103,7 @@ class RemediationPlanner:
                 cve_id=f.cve_id, asset_id=f.asset_id, package=f.package,
                 kind=RemediationKind.PATCH, priority=prio, source_ref=f.cve_id,
                 note=f"Upgrade {f.package} to {f.fixed_version}.",
-                requires_human=False, intent=intent,
+                requires_human=False, intent=intent, **common,
             )
 
         if adv.mitigation:
@@ -106,7 +113,7 @@ class RemediationPlanner:
                 note=f"TEMPORARY mitigation (no patch released): {adv.mitigation}",
                 requires_human=True,
                 tracking=f"Apply the vendor patch for {f.cve_id} on {f.asset_id} "
-                         f"once {f.package} ships a fixed version.",
+                         f"once {f.package} ships a fixed version.", **common,
             )
 
         return RemediationItem(
@@ -114,5 +121,5 @@ class RemediationPlanner:
             kind=RemediationKind.ESCALATE, priority=prio, source_ref=f.cve_id,
             note=f"No patch and no published mitigation for {f.cve_id} affecting "
                  f"{f.package} {f.installed_version}. Escalate for human decision.",
-            requires_human=True,
+            requires_human=True, **common,
         )

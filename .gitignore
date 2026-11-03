@@ -13,6 +13,10 @@ keys/
 .ai-defense/
 inventory.*.yaml
 hosts.real.*
+reports/
+findings.*.json
+*-report.md
+executive-summary.md
 *.sqlite
 *.db
 __pycache__/

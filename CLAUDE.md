@@ -297,6 +297,48 @@ back:
 - Each change links back to its CVE/advisory, approver, and target set.
 - Rollback procedures recorded alongside each change where feasible.
 
+### 8. Reporting & export
+A **read-only presentation layer** (`report/`) over results the toolset already
+produced and redacted. It reaches no host and no secret, and **writes only local
+files** — a fleet vulnerability inventory is precisely what this platform must
+not leak to an external service, so nothing here publishes anywhere. One
+authenticated scan per host feeds both the vuln plan and the upgrade preflight,
+so a report is a single consistent snapshot. The `report` tool / `Engine.report`
+emits four deliverables:
+- **`executive-summary.md`** — posture for decision-makers: KEV count (named),
+  patchable-now vs. needs-upgrade, severity spread, EOL hosts, top risks,
+  recommended actions. No IPs, plain language.
+- **`technical-report.md`** — per host: OS + support status + preflight verdict,
+  and a findings table (CVE, package, installed→fixed, CVSS, KEV, action, and a
+  **source URL** so a human can verify each finding against the advisory before
+  approving — hard rule #6).
+- **`findings.defectdojo.json`** — DefectDojo **Generic Findings Import**. Mapping:
+  `asset_id`→`endpoints[]`, canonical CVE→`vulnerability_ids[]`, `cvss`→
+  `cvssv3_score`, severity band→`severity` (KEV floors it to ≥High), installed/
+  fixed→`component_name`/`component_version`+`mitigation`, source→`references`,
+  `kind`/`kev`→`tags[]`, and a stable `unique_id_from_tool` (`asset:cve:package`)
+  so DefectDojo **reimport closes findings a re-scan no longer sees**. `active` and
+  `verified` are true (observed by an authenticated scan).
+- **`findings.generic.json`** — this platform's own documented, versioned schema
+  (`schema_version` 1.0), self-describing and stable:
+  ```
+  { tool, schema_version, generated_at,
+    provenance: { scope[], advisory_source, kev_enabled, scan_mode,
+                  audit_verified },
+    summary:    { assets, findings, by_kind{}, by_severity{}, kev, eol_assets[] },
+    assets: [ { asset_id, os, ecosystem, support_status,
+                upgrade: { verdict, target, path[] },
+                findings: [ { cve_id, package, kind, severity, cvss, kev,
+                              installed_version, fixed_version, priority,
+                              requires_human, source_ref, reference_url, note,
+                              unique_id } ] } ] }
+  ```
+  `reference_url` is the human-verifiable advisory link; `unique_id`
+  (`asset:cve:package`) is stable across re-runs. A **provenance** block on every
+  artifact records when, what scope, which advisory source, whether KEV was
+  applied, the scan mode, and the audit-chain verification — so a report is
+  itself auditable.
+
 ---
 
 ## Approval model (summary)

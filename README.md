@@ -93,7 +93,8 @@ Working vertical slice. Implemented and tested end to end:
   (keys under `key_dir`, referenced by `key_ref`, never in the DB), and a
   read-only SSH host inspector (`dpkg-query`). Run it behind the chat server with
   `ai-defense mcp --ssh-keys <dir> [--known-hosts <file>]`. Needs the `ssh` extra
-  (`pip install -e ".[ssh]"`).
+  (`pip install -e ".[ssh]"`). OpenSSH/PEM keys and **unencrypted PuTTY `.ppk`**
+  keys (ed25519/RSA/ECDSA, parsed natively) are both accepted.
 
 - **AWS in chat (live)** — `--aws-region` makes the cloud tools use real boto3
   (CLI-profile auth; creds resolved from the vault by `credential_ref`, no keys
@@ -103,7 +104,8 @@ Working vertical slice. Implemented and tested end to end:
 
 - **Live vulnerability data (OSV)** — `--osv` makes the planner query OSV.dev for
   the packages a scan actually observed (stdlib HTTP, no extra dep), normalizing
-  real CVEs into the same `Advisory` shape the correlator/planner use. Without
+  real CVEs into the same `Advisory` shape the correlator/planner use, computing
+  the CVSS base score from the advisory's v3 vector for prioritization. Without
   it, the built-in demo advisory set is used.
 
 - **CISA KEV enrichment** — `--kev` fetches CISA's Known Exploited
@@ -120,16 +122,17 @@ One-shot install into a local virtualenv (creates `.venv`, installs the package,
 runs the tests and the demo):
 
 ```bash
-./install.sh                 # Linux/macOS  (optional: ./install.sh dev,aws,mcp)
+./install.sh                 # Linux/macOS  (optional: ./install.sh dev,mcp,ssh,aws)
 ```
 ```powershell
-.\install.ps1                # Windows      (optional: .\install.ps1 -Extras "dev,aws,mcp")
+.\install.ps1                # Windows      (optional: .\install.ps1 -Extras "dev,mcp,ssh,aws")
 ```
 
-Or manually:
+Extras: `mcp` (chat server), `ssh` (real SSH backend + native `.ppk`),
+`aws` (live boto3 cloud). Or manually:
 
 ```bash
-pip install -r requirements-dev.txt   # or: pip install -e ".[dev,mcp]"
+pip install -r requirements-dev.txt   # or: pip install -e ".[dev,mcp,ssh,aws]"
 pip install -e .
 python -m ai_defense demo             # full lifecycle on simulated backends, no infra
 pytest                                # test suite

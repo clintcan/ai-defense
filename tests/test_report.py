@@ -270,3 +270,30 @@ def test_clean_report_has_no_degradation_signal():
     assert "DEGRADED" not in technical_report_md(r)
     assert to_generic(r)["provenance"]["feed_degraded"] is False
     assert "scan-degraded" not in to_defectdojo(r)["findings"][0]["tags"]
+
+
+def test_scan_failure_hints_are_type_keyed_and_leak_no_message():
+    # A failed scan records a static, type-keyed operator hint so the report is
+    # self-diagnosing — but still never the exception's message (no host/path/
+    # credential leak into a model-visible result).
+    from ai_defense.scanner.scanner import AuthenticatedScanner
+    fail = AuthenticatedScanner._failed
+
+    assert "firewall" in fail("h", TimeoutError("boom")).misconfigurations[0]
+
+    # Hints are keyed on the class NAME, so stand-in classes reproduce paramiko's
+    # exception types without importing the optional ssh extra in tests.
+    class AuthenticationException(Exception):
+        pass
+
+    class BadHostKeyException(Exception):
+        pass
+
+    auth = fail("h", AuthenticationException("key /secret/path rejected")).misconfigurations[0]
+    assert "user and key_ref" in auth
+    assert "/secret/path" not in auth                     # message must not leak
+    assert "rebuilt" in fail("h", BadHostKeyException("x")).misconfigurations[0]
+
+    # An unmapped type degrades to the bare type name — still no message.
+    bare = fail("h", OSError("connection refused")).misconfigurations[0]
+    assert bare == "scan failed: OSError"

@@ -26,6 +26,23 @@ class HostFindings:
     system_state: dict = field(default_factory=dict)
 
 
+# A static, type-keyed operator hint for the common authenticated-scan failures,
+# so a fleet report is self-diagnosing instead of needing a manual investigation
+# each sweep. Keyed purely on the exception *class name*: the string is identical
+# for every instance of that type and carries no instance data, so — like the
+# bare type name — it leaks no host, path, or credential detail into a
+# model-visible result.
+_SCAN_FAILURE_HINTS: dict[str, str] = {
+    "TimeoutError": "host unreachable on the SSH port — check the instance/network firewall",
+    "AuthenticationException": "SSH authentication rejected — verify the host's user and key_ref",
+    "BadHostKeyException": "host key changed (likely rebuilt) — clear the stale known_hosts entry",
+    "NoValidConnectionsError": "no SSH service accepted the connection — verify sshd and the port",
+    "ConnectionRefusedError": "connection refused on the SSH port — sshd down or wrong port",
+    "SSHException": "SSH negotiation error — inspect the host's SSH service",
+    "gaierror": "address did not resolve — check the asset's registry host entry",
+}
+
+
 class HostInspector(Protocol):
     """Collects raw read-only observations for one asset. Implementations MUST
     be side-effect free (query/check-mode only)."""
@@ -87,6 +104,12 @@ class AuthenticatedScanner:
     @staticmethod
     def _failed(asset_id: str, exc: Exception) -> HostFindings:
         # Record only the exception type, never its message — it can carry host
-        # or path detail that must not leak into a model-visible result.
-        return HostFindings(asset_id=asset_id,
-                            misconfigurations=[f"scan failed: {type(exc).__name__}"])
+        # or path detail that must not leak into a model-visible result. Attach a
+        # static, type-keyed hint (identical for every instance of the type, so
+        # still no instance data) to make the failure actionable in the report.
+        kind = type(exc).__name__
+        label = f"scan failed: {kind}"
+        hint = _SCAN_FAILURE_HINTS.get(kind)
+        if hint:
+            label = f"{label} — {hint}"
+        return HostFindings(asset_id=asset_id, misconfigurations=[label])

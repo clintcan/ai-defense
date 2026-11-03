@@ -66,20 +66,44 @@ equivalent `"command": "...\\.venv\\Scripts\\python.exe", "args": ["-m",
 **Add** the server (simulated backends, durable DB):
 
 ```bash
+# bash / Linux / macOS
 claude mcp add ai-defense -- \
   "C:/path/to/ai_defense/.venv/Scripts/ai-defense.exe" mcp \
   --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
+```
+```powershell
+# PowerShell (Windows) — backtick continues lines
+claude mcp add ai-defense -- `
+  "C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe" mcp `
+  --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
+```
+```bat
+:: cmd.exe (Windows) — one line
+claude mcp add ai-defense -- "C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe" mcp --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
 ```
 
 **Real SSH mode** (patch actual hosts; needs the `ssh` extra and a key dir — see
 "Real SSH mode" below):
 
 ```bash
+# bash / Linux / macOS
 claude mcp add ai-defense -- \
   "C:/path/to/ai_defense/.venv/Scripts/ai-defense.exe" mcp \
   --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" \
   --ssh-keys "C:/path/to/ai_defense/keys" \
   --known-hosts "C:/Users/you/.ssh/known_hosts"
+```
+```powershell
+# PowerShell (Windows)
+claude mcp add ai-defense -- `
+  "C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe" mcp `
+  --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" `
+  --ssh-keys "C:\path\to\ai_defense\keys" `
+  --known-hosts "C:\Users\you\.ssh\known_hosts"
+```
+```bat
+:: cmd.exe (Windows) — one line
+claude mcp add ai-defense -- "C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe" mcp --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" --ssh-keys "C:\path\to\ai_defense\keys" --known-hosts "C:\Users\you\.ssh\known_hosts"
 ```
 
 **Check / remove / re-add** (re-adding requires removing first — otherwise you
@@ -100,9 +124,14 @@ The demo backends ship a simulated vault key `ssh-key/vps-demo-01`, so onboard a
 host that uses it (either ask Claude to, or out-of-band):
 
 ```bash
+# bash
 register-vps --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" \
   --asset-id vps-demo-01 --host 198.51.100.20 --key-ref ssh-key/vps-demo-01 \
   --owner you --environment prod --granted-by you --attestation-sig manual
+```
+```powershell
+# PowerShell / cmd (Windows) — one line
+register-vps --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" --asset-id vps-demo-01 --host 198.51.100.20 --key-ref ssh-key/vps-demo-01 --owner you --environment prod --granted-by you --attestation-sig manual
 ```
 
 ## 4. Talk to Claude
@@ -123,9 +152,15 @@ Example prompts:
 - Out-of-band in a terminal (recommended for real separation of duties):
 
 ```bash
+# bash
 ai-defense pending --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
 ai-defense approve --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" \
   --change-set cs_... --approver you
+```
+```powershell
+# PowerShell / cmd (Windows) — one line each
+ai-defense pending --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"
+ai-defense approve --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" --change-set cs_... --approver you
 ```
 
 Then tell Claude "try the patch again" — `remediate` now applies it (dry-run

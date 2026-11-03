@@ -203,6 +203,9 @@ To act on real machines over SSH, add `--ssh-keys` pointing at a key directory
 
 - Put each private key at `<keys>/<key_ref>` — e.g. `key_ref` `ssh-key/vps-01`
   → file `<keys>/ssh-key/vps-01`. Keep that directory owner-only and out of git.
+- Keys must be **OpenSSH/PEM** format. A PuTTY `.ppk` won't load — convert it
+  first: `puttygen mykey.ppk -O private-openssh -o <keys>/ssh-key/vps-01`
+  (or PuTTYgen GUI: Conversions → Export OpenSSH key).
 - Host-key verification is **on**: the target must be in `--known-hosts`. Add
   `--allow-unknown-hosts` only for trust-on-first-use (less safe).
 - Cloud (AWS) tools remain simulated in this mode; a live AWS backend is a

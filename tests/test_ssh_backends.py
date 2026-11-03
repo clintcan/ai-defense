@@ -160,3 +160,12 @@ def test_paramiko_transport_allow_unknown_uses_autoadd(monkeypatch):
 
     ParamikoTransport(allow_unknown_hosts=True).run("h", ["true"], key="K", timeout=5)
     assert _FakeSSHClient.last["policy"] == "AutoAddPolicy"
+
+
+def test_putty_ppk_key_gives_helpful_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "paramiko", _fake_paramiko())
+    from ai_defense.ssh.paramiko_transport import ParamikoTransport
+
+    ppk = "PuTTY-User-Key-File-3: ssh-ed25519\nEncryption: none\n..."
+    with pytest.raises(ValueError, match="puttygen"):
+        ParamikoTransport().run("h", ["true"], key=ppk, timeout=5)

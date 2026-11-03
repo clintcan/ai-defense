@@ -18,6 +18,14 @@ from .executor import CommandOutput
 
 def _load_key(key_text: str, passphrase: str | None):
     import paramiko
+
+    # PuTTY .ppk is not an OpenSSH key; paramiko can't load it. Give a clear fix.
+    if key_text.lstrip().startswith("PuTTY-User-Key-File"):
+        raise ValueError(
+            "PuTTY .ppk key detected; paramiko needs an OpenSSH key. Convert it: "
+            "`puttygen mykey.ppk -O private-openssh -o <keydir>/ssh-key/<name>` "
+            "(or PuTTYgen GUI: Conversions -> Export OpenSSH key).")
+
     # Try the common key types; paramiko has no single auto-detect loader.
     for cls in (getattr(paramiko, n) for n in
                 ("Ed25519Key", "ECDSAKey", "RSAKey", "DSSKey") if hasattr(paramiko, n)):
@@ -25,7 +33,8 @@ def _load_key(key_text: str, passphrase: str | None):
             return cls.from_private_key(io.StringIO(key_text), password=passphrase)
         except paramiko.SSHException:
             continue
-    raise ValueError("unsupported or unparseable SSH private key")
+    raise ValueError("unsupported or unparseable SSH private key (expected an "
+                     "OpenSSH/PEM private key)")
 
 
 class ParamikoTransport:

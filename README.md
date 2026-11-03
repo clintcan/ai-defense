@@ -61,10 +61,15 @@ Working vertical slice. Implemented and tested end to end:
   neither → escalate**. Proven end to end: scan → plan → approved, dry-run,
   audited remediation on a canary.
 
-Still stubbed: AWS protective/write ops (snapshot, patch-baseline), other AWS
-services and cloud providers, and real advisory-feed / host-inspector clients
-(the seams are in place; implementations are injected in tests). Run `pytest`
-(90 tests) and `ruff check src tests`.
+- **AWS protective slice** — `snapshot_before_change` as a `PROTECTIVE`
+  (autonomous) tool: EBS snapshots of every attached volume for EC2, and the
+  separate instance-snapshot API for Lightsail. Returns a rollback hint for the
+  audit trail / a remediation item's rollback payload.
+
+Still stubbed: AWS write op (`apply_patch_baseline`), other AWS services and
+cloud providers, and real advisory-feed / host-inspector / boto3 clients (the
+seams are in place; implementations are injected in tests). Run `pytest`
+(96 tests) and `ruff check src tests`.
 
 ## Dev
 

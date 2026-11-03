@@ -97,10 +97,54 @@ class AwsAdapter(CloudAdapter):
         ids = params.get("instance_ids") or params.get("targets") or []
         return len(ids)
 
-    # --- protective / write (not in the read-only slice) -----------------
+    # --- protective (snapshot before change) -----------------------------
 
-    def snapshot_before_change(self, instance_id: str) -> dict:
-        raise NotImplementedError("snapshot_before_change: protective slice, not yet implemented")
+    def snapshot_before_change(self, instance_id: str, *, service: str = "ec2",
+                               reason: str = "") -> dict:
+        """Snapshot an instance before a change so the change is reversible.
+
+        EC2 snapshots every attached EBS volume; Lightsail uses its own
+        instance-snapshot API. Returns a normalized record with the created
+        snapshot id(s) and a rollback hint, suitable for the audit log and a
+        RemediationItem's rollback payload.
+        """
+        if service == "lightsail":
+            return self._snapshot_lightsail(instance_id, reason)
+        if service == "ec2":
+            return self._snapshot_ec2(instance_id, reason)
+        raise ValueError(f"unsupported service for snapshot: {service!r}")
+
+    def _snapshot_ec2(self, instance_id: str, reason: str) -> dict:
+        volumes = self._client.describe_instance_volumes(instance_id)
+        volume_ids = [v["VolumeId"] for v in volumes if "VolumeId" in v]
+        if not volume_ids:
+            raise ValueError(f"no EBS volumes found for instance {instance_id}")
+        snapshots = []
+        for vid in volume_ids:
+            snap = self._client.create_ebs_snapshot(
+                vid,
+                f"ai-defense pre-change snapshot of {instance_id} ({reason})"[:255],
+                {"ai-defense": "pre-change", "instance-id": instance_id},
+            )
+            snapshots.append({"volume_id": vid, "snapshot_id": snap.get("SnapshotId")})
+        return {
+            "service": "ec2", "instance_id": instance_id, "snapshots": snapshots,
+            "snapshot_ids": [s["snapshot_id"] for s in snapshots],
+            "rollback": f"restore EC2 instance {instance_id} from EBS snapshot(s) "
+                        f"{[s['snapshot_id'] for s in snapshots]}",
+        }
+
+    def _snapshot_lightsail(self, instance_name: str, reason: str) -> dict:
+        snapshot_name = f"ai-defense-{instance_name}-prechange"
+        self._client.create_lightsail_snapshot(instance_name, snapshot_name)
+        return {
+            "service": "lightsail", "instance_id": instance_name,
+            "snapshot_ids": [snapshot_name],
+            "rollback": f"restore Lightsail instance {instance_name} from snapshot "
+                        f"{snapshot_name}",
+        }
+
+    # --- write (not in this slice) ---------------------------------------
 
     def apply_patch_baseline(self, instance_ids: list[str], baseline: str) -> dict:
         raise NotImplementedError("apply_patch_baseline: write slice, not yet implemented")

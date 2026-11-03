@@ -19,6 +19,7 @@ from .aws_client import AwsClient
 EC2_DISCOVERY_TOOL = "aws.ec2.list_instances"
 PATCH_STATE_TOOL = "aws.ssm.describe_patch_state"
 LIGHTSAIL_DISCOVERY_TOOL = "aws.lightsail.list_instances"
+SNAPSHOT_TOOL = "aws.snapshot_before_change"
 
 ClientFactory = Callable[[dict], AwsClient]
 
@@ -77,6 +78,44 @@ def make_lightsail_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
         },
         executor=_execute,
         capability=ToolCapability.READ_ONLY,
+    )
+
+
+def make_snapshot_tool(client_factory: ClientFactory) -> ToolSpec:
+    """Protective snapshot-before-change (capability=PROTECTIVE, autonomous).
+
+    Targets the instance being protected (which must be a registered, authorized
+    asset). Supports EC2 (EBS snapshots) and Lightsail (instance snapshot)."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        credentials = resolve_secret(params["credential_ref"])
+        adapter = AwsAdapter(client_factory(credentials))
+        record = adapter.snapshot_before_change(
+            params["instance_id"],
+            service=params.get("service", "ec2"),
+            reason=params.get("reason", ""),
+        )
+        return ToolResult(
+            ok=True, tool=SNAPSHOT_TOOL,
+            summary=f"snapshot created for {params['instance_id']}: "
+                    f"{record['snapshot_ids']}",
+            data=record,
+        )
+
+    return ToolSpec(
+        name=SNAPSHOT_TOOL,
+        schema={
+            "type": "object",
+            "required": ["instance_id", "credential_ref"],
+            "properties": {
+                "instance_id": {"type": "string"},
+                "service": {"type": "string", "enum": ["ec2", "lightsail"]},
+                "credential_ref": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.PROTECTIVE,
     )
 
 

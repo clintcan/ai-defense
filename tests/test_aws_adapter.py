@@ -11,9 +11,11 @@ from ai_defense.cloud.tools import (
     EC2_DISCOVERY_TOOL,
     LIGHTSAIL_DISCOVERY_TOOL,
     PATCH_STATE_TOOL,
+    SNAPSHOT_TOOL,
     make_ec2_discovery_tool,
     make_lightsail_discovery_tool,
     make_patch_state_tool,
+    make_snapshot_tool,
 )
 from ai_defense.registry.assets import Asset, AssetRegistry, Authorization
 from ai_defense.toolset.dispatch import Dispatcher
@@ -61,6 +63,22 @@ class FakeAwsClient:
                 "tags": [{"key": "env", "value": "prod"}, {"key": "owner"}],
             },
         ]
+
+    # --- protective snapshot fakes --------------------------------------
+
+    def describe_instance_volumes(self, instance_id):
+        self.calls.append(("describe_instance_volumes", instance_id))
+        if instance_id == "i-novol":
+            return []
+        return [{"VolumeId": "vol-aaa"}, {"VolumeId": "vol-bbb"}]
+
+    def create_ebs_snapshot(self, volume_id, description, tags):
+        self.calls.append(("create_ebs_snapshot", volume_id, description, tags))
+        return {"SnapshotId": f"snap-{volume_id}"}
+
+    def create_lightsail_snapshot(self, instance_name, snapshot_name):
+        self.calls.append(("create_lightsail_snapshot", instance_name, snapshot_name))
+        return {"operations": [{"status": "Started"}]}
 
     def describe_instance_patch_states(self, instance_ids):
         self.calls.append(("describe_instance_patch_states", instance_ids))
@@ -122,12 +140,39 @@ def test_blast_radius_zero_for_readonly():
     assert adapter.blast_radius("apply_patch_baseline", {"instance_ids": ["a", "b"]}) == 2
 
 
-def test_write_ops_not_implemented_in_readonly_slice():
+def test_write_ops_not_implemented_in_this_slice():
     adapter = AwsAdapter(FakeAwsClient())
     with pytest.raises(NotImplementedError):
-        adapter.snapshot_before_change("i-001")
-    with pytest.raises(NotImplementedError):
         adapter.apply_patch_baseline(["i-001"], "pb-1")
+
+
+# --- protective snapshot ------------------------------------------------
+
+def test_snapshot_ec2_snapshots_every_volume():
+    adapter = AwsAdapter(FakeAwsClient())
+    rec = adapter.snapshot_before_change("i-001", service="ec2", reason="CVE-1")
+    assert rec["service"] == "ec2"
+    assert rec["snapshot_ids"] == ["snap-vol-aaa", "snap-vol-bbb"]
+    assert "i-001" in rec["rollback"]
+
+
+def test_snapshot_ec2_no_volumes_raises():
+    adapter = AwsAdapter(FakeAwsClient())
+    with pytest.raises(ValueError, match="no EBS volumes"):
+        adapter.snapshot_before_change("i-novol", service="ec2")
+
+
+def test_snapshot_lightsail_uses_its_own_api():
+    adapter = AwsAdapter(FakeAwsClient())
+    rec = adapter.snapshot_before_change("ls-blog-1", service="lightsail")
+    assert rec["service"] == "lightsail"
+    assert rec["snapshot_ids"] == ["ai-defense-ls-blog-1-prechange"]
+
+
+def test_snapshot_unsupported_service_raises():
+    adapter = AwsAdapter(FakeAwsClient())
+    with pytest.raises(ValueError, match="unsupported service"):
+        adapter.snapshot_before_change("i-001", service="rds")
 
 
 # --- dispatcher integration ---------------------------------------------
@@ -147,13 +192,15 @@ def _dispatcher_with(tool):
     reg = ToolRegistry()
     reg.register(tool)
     assets = AssetRegistry()
-    assets.register(Asset("123456789012", "cloud-account", "team", "web-prod",
-                          Authorization("sig", "lead", NOW - timedelta(days=1),
-                                        NOW + timedelta(days=30))))
+    auth = Authorization("sig", "lead", NOW - timedelta(days=1), NOW + timedelta(days=30))
+    assets.register(Asset("123456789012", "cloud-account", "team", "web-prod", auth))
+    assets.register(Asset("i-001", "ec2-instance", "team", "web-prod", auth))
     audit = AuditLog(clock=lambda: NOW)
     backend = _Backend()
     disp = Dispatcher(
-        registry=reg, policy=PolicyEngine({"autonomous_action_classes": ["discovery", "scan"]}),
+        registry=reg,
+        policy=PolicyEngine({"autonomous_action_classes":
+                             ["discovery", "scan", "protective"]}),
         assets=assets, approvals=ApprovalGate(), vault=Vault(backend), audit=audit,
         clock=lambda: NOW,
     )
@@ -220,3 +267,33 @@ def test_lightsail_discovery_runs_autonomously():
     # credential resolved via vault and never exposed
     assert backend.access_log and backend.access_log[0][0] == "aws/discovery-role"
     assert AWS_SECRET not in str(res.data)
+
+
+def test_snapshot_tool_runs_autonomously_as_protective():
+    fake = FakeAwsClient()
+    disp, audit, backend = _dispatcher_with(make_snapshot_tool(lambda creds: fake))
+    intent = Intent(
+        tool=SNAPSHOT_TOOL,
+        params={"instance_id": "i-001", "credential_ref": "aws/snapshot-role",
+                "service": "ec2", "reason": "pre CVE-2026-1 patch"},
+        targets=["i-001"], action_class=ActionClass.PROTECTIVE, reason="pre-change backup",
+    )
+    res = disp.dispatch(intent)
+    assert res.ok                                      # no approval needed (protective)
+    assert res.data["snapshot_ids"] == ["snap-vol-aaa", "snap-vol-bbb"]
+    assert backend.access_log[0][0] == "aws/snapshot-role"
+    blob = "".join(str(r.payload) for r in audit.records())
+    assert AWS_SECRET not in blob
+
+
+def test_snapshot_tool_cannot_be_mislabeled_as_mutating():
+    # The PROTECTIVE capability must not run under a mutating action class.
+    fake = FakeAwsClient()
+    disp, _, _ = _dispatcher_with(make_snapshot_tool(lambda creds: fake))
+    intent = Intent(
+        tool=SNAPSHOT_TOOL,
+        params={"instance_id": "i-001", "credential_ref": "aws/snapshot-role"},
+        targets=["i-001"], action_class=ActionClass.PATCH_FLEET, reason="x",
+    )
+    res = disp.dispatch(intent)
+    assert not res.ok and "may not run under action class" in res.summary

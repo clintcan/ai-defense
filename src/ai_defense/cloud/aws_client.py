@@ -18,7 +18,9 @@ Credential modes (the descriptor is a dict):
   * add ``{"role_arn": ...}`` to any of the above to assume a role on top of the
     base session (preferred for scoped, short-lived discovery credentials).
 
-This slice is read-only (EC2 + SSM + Lightsail describe).
+Read-only discovery (EC2 + SSM + Lightsail describe) plus a protective
+snapshot-before-change path (EBS snapshots for EC2, the separate Lightsail
+instance-snapshot API for Lightsail).
 """
 
 from __future__ import annotations
@@ -37,6 +39,18 @@ class AwsClient(Protocol):
 
     def get_lightsail_instances(self) -> list[dict]:
         """All Lightsail instances in the account/region (separate service API)."""
+
+    # --- protective (snapshot before change) ----------------------------
+
+    def describe_instance_volumes(self, instance_id: str) -> list[dict]:
+        """EBS volume ids attached to an EC2 instance."""
+
+    def create_ebs_snapshot(self, volume_id: str, description: str,
+                            tags: dict[str, str]) -> dict:
+        """Create an EBS snapshot of a volume; returns at least a snapshot id."""
+
+    def create_lightsail_snapshot(self, instance_name: str, snapshot_name: str) -> dict:
+        """Create a Lightsail instance snapshot (separate service API)."""
 
 
 def _base_session(boto3, credentials: dict[str, Any], region: str | None):
@@ -119,3 +133,23 @@ class Boto3AwsClient:
             token = resp.get("nextPageToken")
             if not token:
                 return out
+
+    def describe_instance_volumes(self, instance_id: str) -> list[dict]:
+        resp = self._ec2.describe_volumes(
+            Filters=[{"Name": "attachment.instance-id", "Values": [instance_id]}],
+        )
+        return resp.get("Volumes", [])
+
+    def create_ebs_snapshot(self, volume_id, description, tags) -> dict:
+        tag_specs = [{
+            "ResourceType": "snapshot",
+            "Tags": [{"Key": k, "Value": v} for k, v in tags.items()],
+        }] if tags else []
+        return self._ec2.create_snapshot(
+            VolumeId=volume_id, Description=description, TagSpecifications=tag_specs,
+        )
+
+    def create_lightsail_snapshot(self, instance_name, snapshot_name) -> dict:
+        return self._lightsail.create_instance_snapshot(
+            instanceSnapshotName=snapshot_name, instanceName=instance_name,
+        )

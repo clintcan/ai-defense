@@ -105,9 +105,19 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "cloud_regions",
+        "description": "List the regions available to a registered cloud account "
+                       "(EC2 enabled regions + Lightsail regions). Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["account_id"],
+            "properties": {"account_id": {"type": "string"}},
+        },
+    },
+    {
         "name": "cloud_discover",
         "description": "List EC2 and Lightsail instances in a registered cloud "
-                       "account (read-only).",
+                       "account (Lightsail across all regions). Read-only.",
         "inputSchema": {
             "type": "object",
             "required": ["account_id"],
@@ -209,6 +219,9 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
         if name == "onboard_cloud_account":
             res = engine.onboard_cloud_account(**args)
             return _tool_result_json(res)
+
+        if name == "cloud_regions":
+            return _tool_result_json(engine.cloud_regions(args["account_id"]))
 
         if name == "cloud_discover":
             ec2, ls = engine.cloud_discover(args["account_id"])
@@ -330,6 +343,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "credential_ref": credential_ref, "owner": owner,
             "environment": environment, "granted_by": granted_by, "provider": provider})
 
+    def cloud_regions(account_id: str) -> dict:
+        return handle_call(engine, "cloud_regions", {"account_id": account_id})
+
     def cloud_discover(account_id: str) -> dict:
         return handle_call(engine, "cloud_discover", {"account_id": account_id})
 
@@ -343,7 +359,8 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, remediate, approve_change, audit_tail,
-               onboard_cloud_account, cloud_discover, cloud_patch_state, cloud_remediate):
+               onboard_cloud_account, cloud_regions, cloud_discover, cloud_patch_state,
+               cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

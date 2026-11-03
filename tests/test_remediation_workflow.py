@@ -75,6 +75,8 @@ class _FakeCloud:
     def describe_instances(self, **k): return []
     def describe_instance_patch_states(self, ids): return []
     def get_lightsail_instances(self, all_regions=False): return []
+    def describe_ec2_regions(self): return []
+    def get_lightsail_regions(self): return []
     def create_lightsail_snapshot(self, n, s): return {}
     def delete_lightsail_snapshot(self, n): return {}
 

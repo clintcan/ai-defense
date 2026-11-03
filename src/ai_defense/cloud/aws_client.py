@@ -43,6 +43,12 @@ class AwsClient(Protocol):
         """Lightsail instances (separate service API). ``all_regions`` enumerates
         every Lightsail region instead of just the client's default region."""
 
+    def describe_ec2_regions(self) -> list[str]:
+        """EC2 regions enabled for this account."""
+
+    def get_lightsail_regions(self) -> list[str]:
+        """Regions where Lightsail is available."""
+
     # --- protective (snapshot before change) ----------------------------
 
     def describe_instance_volumes(self, instance_id: str) -> list[dict]:
@@ -163,6 +169,14 @@ class Boto3AwsClient:
             client = self._session.client("lightsail", region_name=region)
             out.extend(self._get_instances(client))
         return out
+
+    def describe_ec2_regions(self) -> list[str]:
+        resp = self._ec2.describe_regions()
+        return [r["RegionName"] for r in resp.get("Regions", []) if r.get("RegionName")]
+
+    def get_lightsail_regions(self) -> list[str]:
+        resp = self._lightsail.get_regions()
+        return [r["name"] for r in resp.get("regions", []) if r.get("name")]
 
     def describe_instance_volumes(self, instance_id: str) -> list[dict]:
         resp = self._ec2.describe_volumes(

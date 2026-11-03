@@ -191,9 +191,10 @@ e.g. a file `<keys>/aws/prod` containing `{"profile": "secops", "region": "us-ea
          "--aws-region", "us-east-1"]
 ```
 
-Cloud tools exposed to chat: `onboard_cloud_account`, `cloud_discover` (EC2 +
-Lightsail), `cloud_patch_state` (SSM compliance), `cloud_remediate` (SSM patch
-baseline — approval-gated). Flow: *"Onboard AWS account 123456789012 with
+Cloud tools exposed to chat: `onboard_cloud_account`, `cloud_regions` (EC2
+enabled regions + Lightsail regions), `cloud_discover` (EC2 + Lightsail),
+`cloud_patch_state` (SSM compliance), `cloud_remediate` (SSM patch baseline —
+approval-gated). Flow: *"Onboard AWS account 123456789012 with
 credential_ref aws/prod"* → approve → *"discover instances in 123456789012"* →
 *"patch i-0abc… in that account"* → approve → done.
 

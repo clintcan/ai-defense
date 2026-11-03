@@ -67,6 +67,12 @@ class FakeAwsClient:
             },
         ]
 
+    def describe_ec2_regions(self):
+        return ["us-west-2", "us-east-1"]       # unsorted on purpose
+
+    def get_lightsail_regions(self):
+        return ["eu-west-1", "us-east-1"]
+
     # --- protective snapshot fakes --------------------------------------
 
     def describe_instance_volumes(self, instance_id):
@@ -149,6 +155,13 @@ def test_list_lightsail_all_regions():
     everywhere = adapter.list_lightsail_instances("acct", all_regions=True)
     assert {i["region"] for i in everywhere} == {
         "us-east-1", "eu-west-1", "ap-southeast-1"}                   # all regions
+
+
+def test_list_regions_sorted_ec2_and_lightsail():
+    out = AwsAdapter(FakeAwsClient()).list_regions("123456789012")
+    assert out["account"] == "123456789012"
+    assert out["ec2"] == ["us-east-1", "us-west-2"]                   # sorted
+    assert out["lightsail"] == ["eu-west-1", "us-east-1"]
 
 
 def test_describe_patch_state_compliance_flag():

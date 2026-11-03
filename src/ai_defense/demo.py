@@ -89,6 +89,12 @@ class DemoAwsClient:
                           "location": {"regionName": "eu-west-1"}, "tags": []})
         return insts
 
+    def describe_ec2_regions(self):
+        return ["us-east-1", "us-west-2", "eu-west-1"]
+
+    def get_lightsail_regions(self):
+        return ["us-east-1", "eu-west-1", "ap-southeast-1"]
+
     def describe_instance_volumes(self, instance_id):
         self.calls.append(("describe_volumes", instance_id))
         return [{"VolumeId": "vol-demo"}]

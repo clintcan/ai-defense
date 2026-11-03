@@ -72,6 +72,14 @@ class AwsAdapter(CloudAdapter):
             })
         return out
 
+    def list_regions(self, account: str) -> dict:
+        """Regions available to the account: EC2 (enabled) and Lightsail."""
+        return {
+            "account": account,
+            "ec2": sorted(self._client.describe_ec2_regions()),
+            "lightsail": sorted(self._client.get_lightsail_regions()),
+        }
+
     def describe_patch_state(self, instance_ids: list[str]) -> list[dict]:
         if not instance_ids:
             return []

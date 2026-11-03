@@ -87,6 +87,21 @@ def test_cloud_discover_lists_ec2_and_lightsail():
     assert not out["errors"]
 
 
+def test_cloud_regions_lists_ec2_and_lightsail():
+    eng = _engine()
+    acct = _onboard_account(eng)
+    out = handle_call(eng, "cloud_regions", {"account_id": acct})
+    assert out["ok"]
+    assert out["data"]["ec2"] and out["data"]["lightsail"]
+    assert "us-east-1" in out["data"]["lightsail"]
+
+
+def test_cloud_regions_requires_registered_account():
+    eng = _engine()
+    out = handle_call(eng, "cloud_regions", {"account_id": "999999999999"})
+    assert "error" in out
+
+
 def test_cloud_patch_state_flags_noncompliant():
     eng = _engine()
     acct = _onboard_account(eng)
@@ -116,8 +131,8 @@ def test_cloud_ops_require_registered_account():
 
 def test_mcp_manifest_includes_cloud_tools():
     from ai_defense.mcp_server import tool_names
-    for t in ("onboard_cloud_account", "cloud_discover", "cloud_patch_state",
-              "cloud_remediate"):
+    for t in ("onboard_cloud_account", "cloud_regions", "cloud_discover",
+              "cloud_patch_state", "cloud_remediate"):
         assert t in tool_names()
 
 

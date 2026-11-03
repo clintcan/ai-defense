@@ -19,6 +19,7 @@ from .aws_client import AwsClient
 EC2_DISCOVERY_TOOL = "aws.ec2.list_instances"
 PATCH_STATE_TOOL = "aws.ssm.describe_patch_state"
 LIGHTSAIL_DISCOVERY_TOOL = "aws.lightsail.list_instances"
+REGIONS_TOOL = "aws.list_regions"
 SNAPSHOT_TOOL = "aws.snapshot_before_change"
 SNAPSHOT_DELETE_TOOL = "aws.delete_snapshots"
 PATCH_BASELINE_TOOL = "aws.ssm.apply_patch_baseline"
@@ -50,6 +51,35 @@ def make_ec2_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
                 "credential_ref": {"type": "string"},
                 "filters": {"type": "array"},
                 "instance_ids": {"type": "array"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.READ_ONLY,
+    )
+
+
+def make_regions_tool(client_factory: ClientFactory) -> ToolSpec:
+    """List the regions available to a registered cloud account (read-only)."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        credentials = resolve_secret(params["credential_ref"])
+        adapter = AwsAdapter(client_factory(credentials))
+        regions = adapter.list_regions(params["account"])
+        return ToolResult(
+            ok=True, tool=REGIONS_TOOL,
+            summary=f"{len(regions['ec2'])} EC2 / {len(regions['lightsail'])} "
+                    f"Lightsail region(s) for account {params['account']}",
+            data=regions,
+        )
+
+    return ToolSpec(
+        name=REGIONS_TOOL,
+        schema={
+            "type": "object",
+            "required": ["account", "credential_ref"],
+            "properties": {
+                "account": {"type": "string"},
+                "credential_ref": {"type": "string"},
             },
         },
         executor=_execute,

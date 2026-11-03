@@ -21,10 +21,12 @@ from .cloud.tools import (
     LIGHTSAIL_DISCOVERY_TOOL,
     PATCH_BASELINE_TOOL,
     PATCH_STATE_TOOL,
+    REGIONS_TOOL,
     make_ec2_discovery_tool,
     make_lightsail_discovery_tool,
     make_patch_baseline_tool,
     make_patch_state_tool,
+    make_regions_tool,
     make_snapshot_delete_tool,
     make_snapshot_tool,
 )
@@ -139,6 +141,11 @@ class Engine:
             tool=tool, params=params, targets=[account_id],
             action_class=action_class, reason=reason))
 
+    def cloud_regions(self, account_id: str) -> ToolResult:
+        """Regions available to a registered cloud account (read-only)."""
+        return self._cloud_dispatch(REGIONS_TOOL, account_id, ActionClass.DISCOVERY,
+                                    {}, "list cloud regions")
+
     def cloud_discover(self, account_id: str) -> ToolResult:
         """EC2 + Lightsail inventory for a registered account (read-only)."""
         ec2 = self._cloud_dispatch(EC2_DISCOVERY_TOOL, account_id,
@@ -248,6 +255,7 @@ def build_engine(
     tools.register(make_snapshot_tool(client_factory))
     tools.register(make_snapshot_delete_tool(client_factory))
     tools.register(make_patch_baseline_tool(client_factory))
+    tools.register(make_regions_tool(client_factory))
     tools.register(make_asset_register_tool(registry.register))   # writes through to DB
     tools.register(make_cloud_account_register_tool(registry.register))
 

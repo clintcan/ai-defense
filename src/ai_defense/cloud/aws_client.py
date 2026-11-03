@@ -52,6 +52,12 @@ class AwsClient(Protocol):
     def create_lightsail_snapshot(self, instance_name: str, snapshot_name: str) -> dict:
         """Create a Lightsail instance snapshot (separate service API)."""
 
+    def delete_ebs_snapshot(self, snapshot_id: str) -> dict:
+        """Delete an EBS snapshot (cleanup once a fix is confirmed stable)."""
+
+    def delete_lightsail_snapshot(self, snapshot_name: str) -> dict:
+        """Delete a Lightsail instance snapshot."""
+
 
 def _base_session(boto3, credentials: dict[str, Any], region: str | None):
     """Build the base boto3 Session from the credential descriptor.
@@ -153,3 +159,9 @@ class Boto3AwsClient:
         return self._lightsail.create_instance_snapshot(
             instanceSnapshotName=snapshot_name, instanceName=instance_name,
         )
+
+    def delete_ebs_snapshot(self, snapshot_id) -> dict:
+        return self._ec2.delete_snapshot(SnapshotId=snapshot_id)
+
+    def delete_lightsail_snapshot(self, snapshot_name) -> dict:
+        return self._lightsail.delete_instance_snapshot(instanceSnapshotName=snapshot_name)

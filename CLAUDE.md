@@ -205,6 +205,19 @@ record — and internal error text is never surfaced to the planner.
   edits, and are subject to the same denylist, dry-run, approval, canary, and
   rollback rules as any other change.
 
+### 6b. Remediation workflow (snapshot → patch → optional cleanup)
+A patch remediation is sequenced so it is reversible by default:
+- **Optional protective snapshot first** — the autonomous snapshot step runs
+  before the change so a rollback point exists. It can be disabled per run.
+- **If the snapshot was requested but fails, the patch is not attempted** — a
+  host is never changed without a backup.
+- **Snapshot taken once** — after the patch's approval, the workflow re-runs
+  with the returned snapshot ids and skips re-snapshotting.
+- **Retention** — the snapshot is kept through approval and through a failed
+  patch (when it is most needed). Deleting it is a separate, deliberate,
+  approval-gated **CLEANUP** action the operator invokes only once the fix is
+  confirmed stable — a safety backup is never destroyed silently.
+
 ### 6a. Managed configuration primitives
 Config/module/service remediations are expressed as declarative, reviewable
 operations — not raw shell edits — so they can be validated, diffed, and rolled

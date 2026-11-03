@@ -66,10 +66,16 @@ Working vertical slice. Implemented and tested end to end:
   separate instance-snapshot API for Lightsail. Returns a rollback hint for the
   audit trail / a remediation item's rollback payload.
 
+- **Remediation workflow** — `RemediationWorkflow` sequences an optional
+  protective snapshot before the approval-gated patch (snapshot once; abort the
+  patch if a requested snapshot fails; retain it through approval/failure), and
+  exposes a deliberate, approval-gated `CLEANUP` to delete the snapshot once the
+  fix is confirmed stable.
+
 Still stubbed: AWS write op (`apply_patch_baseline`), other AWS services and
 cloud providers, and real advisory-feed / host-inspector / boto3 clients (the
 seams are in place; implementations are injected in tests). Run `pytest`
-(96 tests) and `ruff check src tests`.
+(101 tests) and `ruff check src tests`.
 
 ## Dev
 

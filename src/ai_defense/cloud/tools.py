@@ -20,6 +20,7 @@ EC2_DISCOVERY_TOOL = "aws.ec2.list_instances"
 PATCH_STATE_TOOL = "aws.ssm.describe_patch_state"
 LIGHTSAIL_DISCOVERY_TOOL = "aws.lightsail.list_instances"
 SNAPSHOT_TOOL = "aws.snapshot_before_change"
+SNAPSHOT_DELETE_TOOL = "aws.delete_snapshots"
 
 ClientFactory = Callable[[dict], AwsClient]
 
@@ -116,6 +117,40 @@ def make_snapshot_tool(client_factory: ClientFactory) -> ToolSpec:
         },
         executor=_execute,
         capability=ToolCapability.PROTECTIVE,
+    )
+
+
+def make_snapshot_delete_tool(client_factory: ClientFactory) -> ToolSpec:
+    """Delete pre-change snapshots once a fix is stable (capability=MUTATING;
+    dispatch under the CLEANUP action class so it is approval-gated — destroying
+    a safety backup must be deliberate)."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        credentials = resolve_secret(params["credential_ref"])
+        adapter = AwsAdapter(client_factory(credentials))
+        record = adapter.delete_snapshots(
+            params["snapshot_ids"], service=params.get("service", "ec2"),
+        )
+        return ToolResult(
+            ok=True, tool=SNAPSHOT_DELETE_TOOL,
+            summary=f"deleted {len(record['deleted_snapshot_ids'])} snapshot(s)",
+            data=record,
+        )
+
+    return ToolSpec(
+        name=SNAPSHOT_DELETE_TOOL,
+        schema={
+            "type": "object",
+            "required": ["snapshot_ids", "credential_ref"],
+            "properties": {
+                "instance_id": {"type": "string"},
+                "snapshot_ids": {"type": "array"},
+                "service": {"type": "string", "enum": ["ec2", "lightsail"]},
+                "credential_ref": {"type": "string"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.MUTATING,
     )
 
 

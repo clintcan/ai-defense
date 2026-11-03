@@ -144,6 +144,23 @@ class AwsAdapter(CloudAdapter):
                         f"{snapshot_name}",
         }
 
+    def delete_snapshots(self, snapshot_ids: list[str], *, service: str = "ec2") -> dict:
+        """Delete pre-change snapshots once a fix is confirmed stable.
+
+        Deliberately separate from taking a snapshot, and dispatched under the
+        approval-gated CLEANUP action class so a safety backup is never destroyed
+        silently."""
+        deleted = []
+        for sid in snapshot_ids:
+            if service == "lightsail":
+                self._client.delete_lightsail_snapshot(sid)
+            elif service == "ec2":
+                self._client.delete_ebs_snapshot(sid)
+            else:
+                raise ValueError(f"unsupported service for snapshot delete: {service!r}")
+            deleted.append(sid)
+        return {"service": service, "deleted_snapshot_ids": deleted}
+
     # --- write (not in this slice) ---------------------------------------
 
     def apply_patch_baseline(self, instance_ids: list[str], baseline: str) -> dict:

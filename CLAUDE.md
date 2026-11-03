@@ -128,11 +128,35 @@ command *that would run*, never the secrets behind it.
   - Automatic **snapshot/backup** before mutating changes where the platform
     supports it, to enable rollback.
 
-### 5. Vulnerability intelligence & remediation planner
+### 5. Authenticated scanner (read-only)
+- A **read-only** detection component that logs into managed hosts (via the same
+  vault-issued SSH credentials, resolved by the toolset — never by the model)
+  and inspects local state to find missing patches and misconfigurations.
+- Uses standard, auditable tooling: **OpenSCAP / OVAL** content, distro package
+  managers in query mode (`apt list --upgradable`, `dnf updateinfo`,
+  `rpm -qa`), and advisory OVAL definitions. Cloud-side, it reads provider patch
+  and config state (e.g. SSM inventory, Azure Update Manager) through the
+  read-only cloud adapter tools.
+- **Strictly non-mutating.** It only runs query/check-mode commands drawn from
+  the allowlist catalog's read-only subset; it cannot install, modify, or
+  restart anything. Dry-run and write capabilities are *not* wired into this
+  component — detection and remediation are separate code paths.
+- Produces a per-host inventory of installed packages, versions, applied
+  patches, and open misconfigurations. This feeds the remediation planner
+  (below) so correlation is based on *actual observed host state*, not just
+  registry metadata.
+- Runs autonomously within policy and rate limits (it's read-only), on a
+  schedule or on-demand after an advisory lands. Results are audit-logged.
+- Separation of duties: the scanner **detects and reports**; it never decides or
+  applies a fix. Any remediation it implies still goes through the planner and
+  the human-approval gate.
+
+### 6. Vulnerability intelligence & remediation planner
 - Pulls from authoritative feeds: NVD/CVE, vendor advisories, OSV, distro
   security trackers, CISA KEV.
-- Correlates disclosed vulns against the asset registry's installed-software
-  inventory to produce an affected-host list, prioritized (KEV + CVSS +
+- Correlates disclosed vulns against the **authenticated scanner's observed
+  host inventory** (and registry metadata) to produce an affected-host list,
+  prioritized (KEV + CVSS +
   exposure + exploit availability).
 - For each finding it builds a **remediation plan**:
   - **Patch available** → propose the vendor update via the patch tools.
@@ -147,7 +171,7 @@ command *that would run*, never the secrets behind it.
 - **Post-remediation verification**: re-scan to confirm the fix took, and record
   the before/after state.
 
-### 6. Audit, logging & rollback
+### 7. Audit, logging & rollback
 - Append-only, tamper-evident audit log of every intent, approval decision,
   executed command, and result. Secrets are redacted.
 - Each change links back to its CVE/advisory, approver, and target set.
@@ -159,7 +183,7 @@ command *that would run*, never the secrets behind it.
 
 | Action class | Autonomy |
 |---|---|
-| Discovery / read-only scans | Allowed autonomously, within policy & rate limits |
+| Discovery / authenticated read-only scans | Allowed autonomously, within policy & rate limits |
 | Protective (snapshot, backup) | Allowed autonomously before a gated change |
 | Mitigation / patch on **canary** | Requires human approval |
 | Mitigation / patch on **fleet** | Requires human approval (stronger, after canary passes) |

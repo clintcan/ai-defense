@@ -125,6 +125,48 @@ def test_for_inventory_empty_makes_no_request():
     assert http.posts == []
 
 
+def test_querybatch_is_chunked_under_osv_limit():
+    # >1000 unique packages must be split into <=1000-query batches (OSV rejects
+    # larger), and a single CVE id still fetched once.
+    from ai_defense.vuln.osv import _MAX_BATCH
+
+    class _Http:
+        def __init__(self):
+            self.batch_sizes = []
+
+        def post_json(self, url, body):
+            n = len(body["queries"])
+            self.batch_sizes.append(n)
+            assert n <= _MAX_BATCH            # never exceed the OSV cap
+            return {"results": [{"vulns": [{"id": "OSV-X"}]} for _ in range(n)]}
+
+        def get_json(self, url):
+            return {"id": "OSV-X", "aliases": ["CVE-2030-9"],
+                    "affected": [{"package": {"name": "p"}}]}
+
+    pkgs = {f"pkg{i}": "1.0" for i in range(1500)}     # 1500 unique -> 2 batches
+    http = _Http()
+    advs = OsvFeed(http).for_inventory([HostFindings("h1", pkgs)])
+    assert http.batch_sizes == [1000, 500]
+    assert [a.cve_id for a in advs] == ["CVE-2030-9"]   # deduped to one
+
+
+def test_for_inventory_degrades_on_batch_and_detail_errors():
+    # A failing batch is skipped; a failing detail drops just that advisory.
+    class _Http:
+        def post_json(self, url, body):
+            return {"results": [{"vulns": [{"id": "OSV-GOOD"}, {"id": "OSV-BAD"}]}]}
+
+        def get_json(self, url):
+            if url.endswith("OSV-BAD"):
+                raise OSError("rate limited")
+            return {"id": "OSV-GOOD", "aliases": ["CVE-2030-1"],
+                    "affected": [{"package": {"name": "p"}}]}
+
+    advs = OsvFeed(_Http(), max_workers=4).for_inventory([HostFindings("h1", {"p": "1"})])
+    assert [a.cve_id for a in advs] == ["CVE-2030-1"]    # bad one dropped, no crash
+
+
 def test_detail_fetch_dedupes_and_parallelizes():
     # Three packages; two share the SAME vuln id. Detail must be fetched once per
     # UNIQUE id (2 GETs, not 3), and all distinct advisories returned.

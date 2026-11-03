@@ -19,6 +19,7 @@ from .feeds import Advisory, AdvisoryFeed, AffectedPackage
 
 OSV_BASE = "https://api.osv.dev"
 _DEFAULT_WORKERS = 8
+_MAX_BATCH = 1000          # OSV querybatch rejects > 1000 queries per request (HTTP 400)
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
 
@@ -70,25 +71,34 @@ class OsvFeed(AdvisoryFeed):
             return []
         queries = [{"package": {"name": n, "ecosystem": eco}, "version": v}
                    for eco, n, v in triples]
-        resp = self._http.post_json(f"{self._base}/v1/querybatch", {"queries": queries})
 
-        # querybatch returns only vuln ids, and the same id recurs across packages
-        # and query rows. Dedupe to the UNIQUE set before fetching details — the
-        # per-vuln GETs are the expensive leg — then fetch those concurrently.
-        vuln_ids = sorted({
-            v.get("id")
-            for result in resp.get("results", [])
-            for v in result.get("vulns", []) or []
-            if v.get("id")
-        })
+        # OSV caps querybatch at _MAX_BATCH queries, so a fleet scan must be
+        # chunked. A failed chunk is skipped (degrade, not abort) so one bad
+        # request can't sink the whole report. The same vuln id recurs across
+        # packages and rows, so we dedupe to the UNIQUE set before fetching
+        # details — the per-vuln GETs are the expensive leg.
+        vuln_ids: set[str] = set()
+        for start in range(0, len(queries), _MAX_BATCH):
+            chunk = queries[start:start + _MAX_BATCH]
+            try:
+                resp = self._http.post_json(f"{self._base}/v1/querybatch", {"queries": chunk})
+            except Exception:  # noqa: BLE001 - skip a failed batch, keep the rest
+                continue
+            vuln_ids.update(
+                v["id"]
+                for result in resp.get("results", [])
+                for v in result.get("vulns", []) or []
+                if v.get("id")
+            )
         if not vuln_ids:
             return []
-        details = self._fetch_details(vuln_ids)
+        ordered = sorted(vuln_ids)
+        details = self._fetch_details(ordered)
 
         # Build keyed by canonical CVE; iterate sorted ids so the winner for a
         # given CVE is deterministic regardless of fetch-completion order.
         advisories: dict[str, Advisory] = {}
-        for vid in vuln_ids:
+        for vid in ordered:
             detail = details.get(vid)
             if detail is None:
                 continue
@@ -97,21 +107,27 @@ class OsvFeed(AdvisoryFeed):
                 advisories.setdefault(adv.cve_id, adv)
         return list(advisories.values())
 
-    def _fetch_details(self, vuln_ids: list[str]) -> dict[str, dict]:
+    def _fetch_details(self, vuln_ids: list[str]) -> dict[str, dict | None]:
         """Fetch each unique vuln's detail. Parallel (I/O-bound) when there is
-        more than one and workers > 1; otherwise a simple serial fetch."""
-        def get(vid: str) -> dict:
-            return self._http.get_json(f"{self._base}/v1/vulns/{vid}")
+        more than one and workers > 1; otherwise serial. A fetch that fails
+        yields ``None`` (that advisory is dropped) rather than aborting the whole
+        report — a fleet scan issues hundreds of these and must tolerate a
+        transient error or rate-limit."""
+        def get(vid: str) -> dict | None:
+            try:
+                return self._http.get_json(f"{self._base}/v1/vulns/{vid}")
+            except Exception:  # noqa: BLE001 - degrade: drop one advisory, keep the rest
+                return None
 
         if len(vuln_ids) == 1 or self._max_workers == 1:
             return {vid: get(vid) for vid in vuln_ids}
 
-        out: dict[str, dict] = {}
+        out: dict[str, dict | None] = {}
         workers = min(self._max_workers, len(vuln_ids))
         with cf.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(get, vid): vid for vid in vuln_ids}
             for fut in cf.as_completed(futures):
-                out[futures[fut]] = fut.result()      # re-raises like the serial path
+                out[futures[fut]] = fut.result()
         return out
 
 

@@ -52,9 +52,19 @@ Working vertical slice. Implemented and tested end to end:
   env / SSO — piggybacking on the AWS CLI's own config so nothing is stored), or
   carry static keys, optionally layering an assume-role on top.
 
+- **Vulnerability → remediation planner** — the authenticated scanner (on a
+  pluggable read-only `HostInspector`) produces observed `HostFindings`;
+  advisories (normalized `Advisory`, pluggable feeds) are correlated against
+  that observed state with a best-effort version comparator; the planner emits a
+  prioritized plan (CISA KEV → CVSS): **patch available → a dispatchable patch
+  intent; no patch → a labeled-temporary mitigation with a tracking follow-up;
+  neither → escalate**. Proven end to end: scan → plan → approved, dry-run,
+  audited remediation on a canary.
+
 Still stubbed: AWS protective/write ops (snapshot, patch-baseline), other AWS
-services and cloud providers, the vuln feeds/planner, and the scanner
-internals. Run `pytest` (74 tests) and `ruff check src tests`.
+services and cloud providers, and real advisory-feed / host-inspector clients
+(the seams are in place; implementations are injected in tests). Run `pytest`
+(90 tests) and `ruff check src tests`.
 
 ## Dev
 

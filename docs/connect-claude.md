@@ -226,6 +226,30 @@ sort actively-exploited CVEs to the top of the plan:
 "args": ["mcp", "--db", "...", "--osv", "--osv-ecosystem", "Debian", "--kev"]
 ```
 
+In chat you can also say *"report web-prod-1"* to write the four report files
+(executive summary, technical report, DefectDojo + generic JSON) to a local
+folder, or *"preflight web-prod-1"* for a read-only OS-upgrade assessment.
+
+## Reports from the CLI (and fleet sweep)
+
+Reports can also be generated outside chat — handy for a terminal or a cron job.
+The `report` command takes the same engine flags as `mcp`:
+
+```bat
+REM one or more named hosts
+ai-defense report web-prod-1 --db "sqlite+pysqlite:///D:/.../ai.db" ^
+  --ssh-keys "D:/.../keys" --allow-unknown-hosts --osv --kev
+
+REM fleet-wide sweep: every registered ssh-host asset, into one combined report
+ai-defense report --all --db "sqlite+pysqlite:///D:/.../ai.db" ^
+  --ssh-keys "D:/.../keys" --allow-unknown-hosts --osv --kev
+```
+
+Output goes to `./reports/<timestamp>/` unless you pass `--out-dir`. `--all`
+selects every registered `ssh-host` asset (cloud-account and control-plane
+assets are not SSH-scannable), so onboard your hosts first (and point `--db` at
+the database they were onboarded into). Reports are written locally only.
+
 ## Real SSH mode (patch actual hosts)
 
 By default the server uses **simulated** backends (nothing touches real hosts).

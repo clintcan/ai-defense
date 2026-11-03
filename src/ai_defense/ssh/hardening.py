@@ -19,6 +19,7 @@ from typing import Any
 
 
 class PrimitiveKind(str, Enum):
+    PACKAGE = "package"
     CONFIG_EDIT = "config_edit"
     KERNEL_MODULE = "kernel_module"
     SERVICE = "service"

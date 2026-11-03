@@ -2,10 +2,23 @@
 
 The adapter depends on this narrow Protocol, not on boto3 directly, so it is
 testable without AWS or network and boto3 stays an optional extra. The real
-``Boto3AwsClient`` imports boto3 lazily and builds a session from credentials
-resolved by the toolset from the vault at call time (never held by the planner).
+``Boto3AwsClient`` imports boto3 lazily and builds a session from the credential
+descriptor the toolset resolves from the vault at call time (never held by the
+planner).
 
-This slice is read-only (EC2 describe + SSM patch-state describe).
+Credential modes (the descriptor is a dict):
+  * ``{"profile": "<name>"}`` — use a named AWS CLI profile from the shared
+    config/credentials files, exactly as the AWS CLI would (this is how it
+    "piggybacks" on the CLI, including SSO and ``credential_process``).
+  * ``{}`` or ``{"use_default_chain": true}`` — the default botocore provider
+    chain: env vars, shared config (incl. SSO), container role, and the EC2/ECS
+    instance role. No secret material is stored anywhere in that case.
+  * ``{"aws_access_key_id": ..., "aws_secret_access_key": ..., ...}`` — explicit
+    static keys (least preferred).
+  * add ``{"role_arn": ...}`` to any of the above to assume a role on top of the
+    base session (preferred for scoped, short-lived discovery credentials).
+
+This slice is read-only (EC2 + SSM + Lightsail describe).
 """
 
 from __future__ import annotations
@@ -26,16 +39,41 @@ class AwsClient(Protocol):
         """All Lightsail instances in the account/region (separate service API)."""
 
 
+def _base_session(boto3, credentials: dict[str, Any], region: str | None):
+    """Build the base boto3 Session from the credential descriptor.
+
+    Profile and default-chain modes read the same sources as the AWS CLI, so the
+    harness piggybacks on whatever the operator (or the instance role) already
+    has configured — no secret material need be stored by us.
+    """
+    if credentials.get("profile"):
+        return boto3.Session(profile_name=credentials["profile"], region_name=region)
+    if credentials.get("aws_access_key_id"):
+        return boto3.Session(
+            aws_access_key_id=credentials["aws_access_key_id"],
+            aws_secret_access_key=credentials.get("aws_secret_access_key"),
+            aws_session_token=credentials.get("aws_session_token"),
+            region_name=region,
+        )
+    # Default provider chain: env, shared config/credentials (incl. SSO,
+    # credential_process), container role, EC2/ECS instance role — as the CLI.
+    return boto3.Session(region_name=region)
+
+
 class Boto3AwsClient:
     """Real client. Untested against live AWS in this scaffold; requires the
     ``aws`` extra (``pip install -e .[aws]``)."""
 
-    def __init__(self, credentials: dict[str, Any], *, region: str) -> None:
+    def __init__(self, credentials: dict[str, Any] | None = None, *,
+                 region: str | None = None) -> None:
         import boto3  # lazy: only needed when actually talking to AWS
 
+        credentials = credentials or {}
+        session = _base_session(boto3, credentials, region)
+
+        # Optionally assume a role on top of whatever base identity resolved.
         if credentials.get("role_arn"):
-            sts = boto3.client("sts", region_name=region)
-            assumed = sts.assume_role(
+            assumed = session.client("sts").assume_role(
                 RoleArn=credentials["role_arn"],
                 RoleSessionName=credentials.get("session_name", "ai-defense-discovery"),
             )["Credentials"]
@@ -45,13 +83,7 @@ class Boto3AwsClient:
                 aws_session_token=assumed["SessionToken"],
                 region_name=region,
             )
-        else:
-            session = boto3.Session(
-                aws_access_key_id=credentials.get("aws_access_key_id"),
-                aws_secret_access_key=credentials.get("aws_secret_access_key"),
-                aws_session_token=credentials.get("aws_session_token"),
-                region_name=region,
-            )
+
         self._ec2 = session.client("ec2")
         self._ssm = session.client("ssm")
         self._lightsail = session.client("lightsail")

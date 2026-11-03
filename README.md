@@ -47,7 +47,10 @@ Working vertical slice. Implemented and tested end to end:
   state, and Lightsail instances behind an injected client seam (boto3 is an
   optional `[aws]` extra); exposed as `READ_ONLY` discovery tools that resolve
   the AWS credential per call from the vault. Instances are normalized to one
-  stable shape tagged by `service` (`ec2` / `lightsail`).
+  stable shape tagged by `service` (`ec2` / `lightsail`). The credential
+  descriptor can name a profile, use the default provider chain (instance role /
+  env / SSO — piggybacking on the AWS CLI's own config so nothing is stored), or
+  carry static keys, optionally layering an assume-role on top.
 
 Still stubbed: AWS protective/write ops (snapshot, patch-baseline), other AWS
 services and cloud providers, the vuln feeds/planner, and the scanner

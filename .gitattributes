@@ -1,0 +1,4 @@
+# Keep shell scripts LF so the shebang works on Linux/macOS regardless of the
+# platform they were committed from.
+*.sh text eol=lf
+install.sh text eol=lf

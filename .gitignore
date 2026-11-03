@@ -9,6 +9,8 @@ vault-token*
 *.vault
 secrets/
 credentials/
+keys/
+.ai-defense/
 inventory.*.yaml
 hosts.real.*
 *.sqlite

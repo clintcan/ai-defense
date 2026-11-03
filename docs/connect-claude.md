@@ -236,8 +236,15 @@ To act on real machines over SSH, add `--ssh-keys` pointing at a key directory
 }
 ```
 
+- **Where to keep keys:** the `--ssh-keys` directory can live anywhere the
+  server can read; treat it as a credential store. Preferred: a user-private
+  location outside the repo — `C:\Users\you\.ai-defense\keys` (Windows) or
+  `~/.ai-defense/keys` (Linux/macOS) — locked down (`chmod 700`, or on Windows
+  `icacls <dir> /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"`). A project-local
+  `keys/` works too and is git-ignored, but outside the repo is safer. The DB
+  only ever stores the `key_ref`, never the key.
 - Put each private key at `<keys>/<key_ref>` — e.g. `key_ref` `ssh-key/vps-01`
-  → file `<keys>/ssh-key/vps-01`. Keep that directory owner-only and out of git.
+  → file `<keys>/ssh-key/vps-01`.
 - Keys are OpenSSH/PEM. A PuTTY `.ppk` is accepted too: **unencrypted** `.ppk`
   files (ed25519 / RSA / ECDSA) are parsed natively — just drop the `.ppk` at
   `<keys>/ssh-key/<name>`, no conversion needed. An **encrypted** `.ppk` falls

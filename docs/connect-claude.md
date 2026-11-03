@@ -20,6 +20,12 @@ C:\path\to\ai_defense\ai.db
 The server is launched with `--db sqlite+pysqlite:///C:/path/to/ai_defense/ai.db`.
 Omit `--db` for an ephemeral in-memory run.
 
+**Quick manual launch:** run `run-mcp.bat` (Windows) or `./run-mcp.sh`
+(Linux/macOS) from the project folder — they cd in, use the venv's
+`ai-defense`, and default the DB to `ai.db` beside the script. Pass a DB URL as
+the first argument to override. (Claude launches the server itself via the
+config below; these scripts are for trying it by hand.)
+
 ## 2a. Claude Desktop
 
 Edit `claude_desktop_config.json`

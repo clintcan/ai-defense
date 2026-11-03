@@ -22,5 +22,6 @@ approvals:
   patch_fleet:    { required: 1, after: canary_health_ok }
   mitigate_fleet: { required: 1, after: canary_health_ok }
   emergency:      { required: 2 }   # outside window / KEV emergency
+  cleanup:        { required: 1 }   # deleting a pre-change snapshot once the fix is stable
 
 autonomous_action_classes: [discovery, scan, protective]

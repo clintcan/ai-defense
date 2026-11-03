@@ -197,6 +197,13 @@ baseline — approval-gated). Flow: *"Onboard AWS account 123456789012 with
 credential_ref aws/prod"* → approve → *"discover instances in 123456789012"* →
 *"patch i-0abc… in that account"* → approve → done.
 
+**Lightsail is region-scoped.** `cloud_discover` lists Lightsail across **all
+regions** by default (it enumerates the Lightsail regions and queries each), and
+each returned instance carries its `region`. EC2 in the same call is limited to
+the server's `--aws-region`. So "list all my Lightsail instances regardless of
+region" works out of the box; to pin Lightsail to one region, pass
+`all_regions: false` to the `aws.lightsail.list_instances` tool.
+
 ## Live vulnerability data (OSV)
 
 Add `--osv` so `plan` queries OSV.dev for the packages a scan observed, instead

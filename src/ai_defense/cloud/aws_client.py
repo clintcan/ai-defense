@@ -39,8 +39,9 @@ class AwsClient(Protocol):
     def describe_instance_patch_states(self, instance_ids: list[str]) -> list[dict]:
         """SSM patch-state summaries for the given instances."""
 
-    def get_lightsail_instances(self) -> list[dict]:
-        """All Lightsail instances in the account/region (separate service API)."""
+    def get_lightsail_instances(self, all_regions: bool = False) -> list[dict]:
+        """Lightsail instances (separate service API). ``all_regions`` enumerates
+        every Lightsail region instead of just the client's default region."""
 
     # --- protective (snapshot before change) ----------------------------
 
@@ -113,6 +114,7 @@ class Boto3AwsClient:
                 region_name=region,
             )
 
+        self._session = session
         self._ec2 = session.client("ec2")
         self._ssm = session.client("ssm")
         self._lightsail = session.client("lightsail")
@@ -137,17 +139,30 @@ class Boto3AwsClient:
             out.extend(page.get("InstancePatchStates", []))
         return out
 
-    def get_lightsail_instances(self) -> list[dict]:
+    @staticmethod
+    def _get_instances(client) -> list[dict]:
         # GetInstances is page-token based (no boto3 paginator).
         out: list[dict] = []
         token: str | None = None
         while True:
             kwargs = {"pageToken": token} if token else {}
-            resp = self._lightsail.get_instances(**kwargs)
+            resp = client.get_instances(**kwargs)
             out.extend(resp.get("instances", []))
             token = resp.get("nextPageToken")
             if not token:
                 return out
+
+    def get_lightsail_instances(self, all_regions: bool = False) -> list[dict]:
+        if not all_regions:
+            return self._get_instances(self._lightsail)
+        # Lightsail is region-scoped: enumerate every Lightsail region and query
+        # each. Each instance already carries its region in location.regionName.
+        regions = [r["name"] for r in self._lightsail.get_regions().get("regions", [])]
+        out: list[dict] = []
+        for region in regions:
+            client = self._session.client("lightsail", region_name=region)
+            out.extend(self._get_instances(client))
+        return out
 
     def describe_instance_volumes(self, instance_id: str) -> list[dict]:
         resp = self._ec2.describe_volumes(

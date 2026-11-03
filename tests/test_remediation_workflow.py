@@ -74,7 +74,7 @@ class _FakeCloud:
     # unused by these tests but required by the client protocol surface
     def describe_instances(self, **k): return []
     def describe_instance_patch_states(self, ids): return []
-    def get_lightsail_instances(self): return []
+    def get_lightsail_instances(self, all_regions=False): return []
     def create_lightsail_snapshot(self, n, s): return {}
     def delete_lightsail_snapshot(self, n): return {}
 

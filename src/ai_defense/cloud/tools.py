@@ -61,11 +61,15 @@ def make_lightsail_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
     def _execute(params: dict, *, resolve_secret) -> ToolResult:
         credentials = resolve_secret(params["credential_ref"])
         adapter = AwsAdapter(client_factory(credentials))
-        instances = adapter.list_lightsail_instances(params["account"])
+        all_regions = bool(params.get("all_regions", True))   # Lightsail is region-scoped
+        instances = adapter.list_lightsail_instances(params["account"], all_regions=all_regions)
+        scope = "all regions" if all_regions else "default region"
         return ToolResult(
             ok=True, tool=LIGHTSAIL_DISCOVERY_TOOL,
-            summary=f"{len(instances)} Lightsail instance(s) in account {params['account']}",
-            data={"account": params["account"], "instances": instances},
+            summary=f"{len(instances)} Lightsail instance(s) in account "
+                    f"{params['account']} ({scope})",
+            data={"account": params["account"], "instances": instances,
+                  "all_regions": all_regions},
         )
 
     return ToolSpec(
@@ -76,6 +80,7 @@ def make_lightsail_discovery_tool(client_factory: ClientFactory) -> ToolSpec:
             "properties": {
                 "account": {"type": "string"},
                 "credential_ref": {"type": "string"},
+                "all_regions": {"type": "boolean"},
             },
         },
         executor=_execute,

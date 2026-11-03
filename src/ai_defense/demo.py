@@ -78,10 +78,16 @@ class DemoAwsClient:
                  "MissingCount": 2, "FailedCount": 0, "InstalledPendingRebootCount": 0}
                 for i in instance_ids]
 
-    def get_lightsail_instances(self):
-        return [{"name": "ls-demo", "state": {"name": "running"},
-                 "blueprintId": "ubuntu_22_04", "publicIpAddress": "203.0.113.7",
-                 "tags": [{"key": "env", "value": "demo"}]}]
+    def get_lightsail_instances(self, all_regions=False):
+        insts = [{"name": "ls-demo", "state": {"name": "running"},
+                  "blueprintId": "ubuntu_22_04", "publicIpAddress": "203.0.113.7",
+                  "location": {"regionName": "us-east-1"},
+                  "tags": [{"key": "env", "value": "demo"}]}]
+        if all_regions:   # pretend a second region has one too
+            insts.append({"name": "ls-demo-eu", "state": {"name": "running"},
+                          "blueprintId": "debian_12", "publicIpAddress": "198.51.100.8",
+                          "location": {"regionName": "eu-west-1"}, "tags": []})
+        return insts
 
     def describe_instance_volumes(self, instance_id):
         self.calls.append(("describe_volumes", instance_id))

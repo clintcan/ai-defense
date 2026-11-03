@@ -48,19 +48,21 @@ class AwsAdapter(CloudAdapter):
             })
         return out
 
-    def list_lightsail_instances(self, account: str) -> list[dict]:
+    def list_lightsail_instances(self, account: str, *, all_regions: bool = False) -> list[dict]:
         """Lightsail is a separate service; its instances never appear in EC2
         DescribeInstances. Normalized to the same stable instance dict, tagged
         ``service='lightsail'`` so downstream code can tell them apart (their
-        patch/snapshot model differs from EC2)."""
+        patch/snapshot model differs from EC2). ``all_regions`` lists every
+        Lightsail region, not just the client's default."""
         out = []
-        for i in self._client.get_lightsail_instances():
+        for i in self._client.get_lightsail_instances(all_regions=all_regions):
             tags = {t["key"]: t.get("value") for t in (i.get("tags") or []) if "key" in t}
             out.append({
                 "account": account,
                 "service": "lightsail",
                 "instance_id": i.get("name"),          # Lightsail keys on name
                 "arn": i.get("arn"),
+                "region": (i.get("location") or {}).get("regionName"),
                 "state": (i.get("state") or {}).get("name"),
                 "platform": i.get("blueprintId") or "linux",
                 "name": i.get("name"),

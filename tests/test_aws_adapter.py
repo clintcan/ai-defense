@@ -52,14 +52,15 @@ class FakeAwsClient:
             },
         ]
 
-    def get_lightsail_instances(self):
-        self.calls.append(("get_lightsail_instances",))
+    def get_lightsail_instances(self, all_regions=False):
+        self.calls.append(("get_lightsail_instances", all_regions))
         return [
             {
                 "name": "ls-blog-1",
                 "arn": "arn:aws:lightsail:us-east-1:123456789012:Instance/abc",
                 "state": {"name": "running"},
                 "blueprintId": "ubuntu_22_04",
+                "location": {"regionName": "us-east-1"},
                 "privateIpAddress": "172.26.0.5",
                 "publicIpAddress": "3.4.5.6",
                 "tags": [{"key": "env", "value": "prod"}, {"key": "owner"}],
@@ -121,7 +122,33 @@ def test_list_lightsail_instances_normalizes():
     assert inst["state"] == "running"
     assert inst["platform"] == "ubuntu_22_04"
     assert inst["public_ip"] == "3.4.5.6"
+    assert inst["region"] == "us-east-1"            # from location.regionName
     assert inst["tags"] == {"env": "prod", "owner": None}   # valueless tag kept
+
+
+class _MultiRegionLightsail(FakeAwsClient):
+    """Enumerates regions and returns an instance per region (like all_regions)."""
+
+    def get_lightsail_instances(self, all_regions=False):
+        self.calls.append(("get_lightsail_instances", all_regions))
+        if not all_regions:
+            return [{"name": "ls-use1", "location": {"regionName": "us-east-1"},
+                     "state": {"name": "running"}, "tags": []}]
+        return [{"name": "ls-use1", "location": {"regionName": "us-east-1"},
+                 "state": {"name": "running"}, "tags": []},
+                {"name": "ls-euw1", "location": {"regionName": "eu-west-1"},
+                 "state": {"name": "running"}, "tags": []},
+                {"name": "ls-apse1", "location": {"regionName": "ap-southeast-1"},
+                 "state": {"name": "running"}, "tags": []}]
+
+
+def test_list_lightsail_all_regions():
+    adapter = AwsAdapter(_MultiRegionLightsail())
+    default = adapter.list_lightsail_instances("acct")
+    assert {i["region"] for i in default} == {"us-east-1"}            # one region
+    everywhere = adapter.list_lightsail_instances("acct", all_regions=True)
+    assert {i["region"] for i in everywhere} == {
+        "us-east-1", "eu-west-1", "ap-southeast-1"}                   # all regions
 
 
 def test_describe_patch_state_compliance_flag():

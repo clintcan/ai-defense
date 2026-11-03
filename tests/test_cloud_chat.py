@@ -119,3 +119,31 @@ def test_mcp_manifest_includes_cloud_tools():
     for t in ("onboard_cloud_account", "cloud_discover", "cloud_patch_state",
               "cloud_remediate"):
         assert t in tool_names()
+
+
+def test_boto3_client_lists_lightsail_all_regions(fake_boto3):
+    # validate the real Boto3AwsClient enumerates Lightsail regions and queries
+    # each, using the injected fake boto3 session/clients.
+    from ai_defense.cloud.aws_client import Boto3AwsClient
+
+    class _LS:
+        def __init__(self, region): self.region = region
+        def get_regions(self, **k):
+            return {"regions": [{"name": "us-east-1"}, {"name": "eu-west-1"}]}
+        def get_instances(self, **k):
+            return {"instances": [{"name": f"ls-{self.region}",
+                                   "location": {"regionName": self.region}}]}
+
+    def client(name, region_name=None):
+        if name == "lightsail":
+            return _LS(region_name or "us-east-1")
+        return object()
+    # build directly with our fake session wiring
+    _FakeSession.instances = []
+    monkey_session = _FakeSession()
+    monkey_session.client = client
+    c = Boto3AwsClient.__new__(Boto3AwsClient)
+    c._session = monkey_session
+    c._lightsail = client("lightsail", "us-east-1")
+    out = c.get_lightsail_instances(all_regions=True)
+    assert {i["location"]["regionName"] for i in out} == {"us-east-1", "eu-west-1"}

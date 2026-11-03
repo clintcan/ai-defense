@@ -162,3 +162,34 @@ def test_boto3_client_lists_lightsail_all_regions(fake_boto3):
     c._lightsail = client("lightsail", "us-east-1")
     out = c.get_lightsail_instances(all_regions=True)
     assert {i["location"]["regionName"] for i in out} == {"us-east-1", "eu-west-1"}
+
+
+def test_lightsail_all_regions_skips_unreachable(fake_boto3):
+    # One region rejects the token (opt-in region) — the sweep must skip it and
+    # still return instances from the reachable regions.
+    from ai_defense.cloud.aws_client import Boto3AwsClient
+
+    class _LS:
+        def __init__(self, region): self.region = region
+        def get_regions(self, **k):
+            return {"regions": [{"name": "us-west-2"}, {"name": "ap-east-1"},
+                                {"name": "us-east-2"}]}
+        def get_instances(self, **k):
+            if self.region == "ap-east-1":
+                raise RuntimeError("UnrecognizedClientException: token invalid")
+            return {"instances": [{"name": f"ls-{self.region}",
+                                   "location": {"regionName": self.region}}]}
+
+    def client(name, region_name=None):
+        return _LS(region_name or "us-west-2") if name == "lightsail" else object()
+
+    _FakeSession.instances = []
+    sess = _FakeSession()
+    sess.client = client
+    c = Boto3AwsClient.__new__(Boto3AwsClient)
+    c._session = sess
+    c._lightsail = client("lightsail", "us-west-2")
+
+    out = c.get_lightsail_instances(all_regions=True)
+    assert {i["location"]["regionName"] for i in out} == {"us-west-2", "us-east-2"}
+    assert c.skipped_regions == ["ap-east-1"]      # unreachable region recorded, not fatal

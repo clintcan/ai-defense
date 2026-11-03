@@ -162,12 +162,18 @@ class Boto3AwsClient:
         if not all_regions:
             return self._get_instances(self._lightsail)
         # Lightsail is region-scoped: enumerate every Lightsail region and query
-        # each. Each instance already carries its region in location.regionName.
+        # each. Be resilient — a region the account can't reach (e.g. an opt-in
+        # region where a global STS token is rejected) must not abort the sweep,
+        # so skip failures and return instances from the reachable regions.
         regions = [r["name"] for r in self._lightsail.get_regions().get("regions", [])]
         out: list[dict] = []
+        self.skipped_regions: list[str] = []
         for region in regions:
-            client = self._session.client("lightsail", region_name=region)
-            out.extend(self._get_instances(client))
+            try:
+                client = self._session.client("lightsail", region_name=region)
+                out.extend(self._get_instances(client))
+            except Exception:  # noqa: BLE001 - per-region resilience; region recorded, sweep continues
+                self.skipped_regions.append(region)
         return out
 
     def describe_ec2_regions(self) -> list[str]:

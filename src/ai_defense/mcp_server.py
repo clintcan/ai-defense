@@ -168,7 +168,8 @@ def _asset_json(a: Asset) -> dict:
 
 
 def _findings_json(f: HostFindings) -> dict:
-    return {"asset_id": f.asset_id, "installed_packages": f.installed_packages,
+    return {"asset_id": f.asset_id, "ecosystem": f.ecosystem,
+            "installed_packages": f.installed_packages,
             "applied_patches": f.applied_patches,
             "misconfigurations": f.misconfigurations}
 

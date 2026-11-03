@@ -191,3 +191,39 @@ def test_encrypted_ppk_converted_when_puttygen_present(monkeypatch):
 
     out = pt.ParamikoTransport().run("h", ["true"], key=_PPK_ENCRYPTED, timeout=5)
     assert out.exit_code == 0            # converted key loaded + command ran
+
+
+# --- OS detection -> OSV ecosystem --------------------------------------
+
+from ai_defense.scanner.ssh_inspector import osv_ecosystem, parse_os_release  # noqa: E402
+
+
+def test_parse_os_release():
+    text = 'NAME="Ubuntu"\nVERSION_ID="18.04"\nID=ubuntu\n# comment\n'
+    d = parse_os_release(text)
+    assert d["ID"] == "ubuntu" and d["VERSION_ID"] == "18.04"
+
+
+def test_osv_ecosystem_mapping():
+    assert osv_ecosystem({"ID": "ubuntu", "VERSION_ID": "18.04"}) == "Ubuntu:18.04:LTS"
+    assert osv_ecosystem({"ID": "ubuntu", "VERSION_ID": "24.04"}) == "Ubuntu:24.04:LTS"
+    assert osv_ecosystem({"ID": "ubuntu", "VERSION_ID": "23.10"}) == "Ubuntu:23.10"
+    assert osv_ecosystem({"ID": "debian", "VERSION_ID": "10"}) == "Debian:10"
+    assert osv_ecosystem({"ID": "fedora", "VERSION_ID": "40"}) is None   # fallback
+
+
+class _OsTransport:
+    """Returns os-release for the cat command, dpkg output for dpkg-query."""
+
+    def run(self, host, argv, *, key, timeout, user="root", port=22):
+        if argv[0] == "cat":
+            return CommandOutput(0, 'ID=ubuntu\nVERSION_ID="22.04"\n', "")
+        return CommandOutput(0, "openssl 3.0.2\n", "")
+
+
+def test_inspector_sets_ecosystem_from_os_release():
+    conn = ConnectionInfo(host="h", key_ref="ssh-key/h")
+    insp = SSHHostInspector(lambda a: conn, _VaultStub(), _OsTransport())
+    findings = insp.collect("h")
+    assert findings["ecosystem"] == "Ubuntu:22.04:LTS"
+    assert findings["installed_packages"] == {"openssl": "3.0.2"}

@@ -106,3 +106,20 @@ def test_static_feed_ignores_inventory():
     # default static feed's for_inventory just returns fetch()
     planner = RemediationPlanner()
     assert planner is not None   # sanity; static behaviour covered in test_vuln_planner
+
+
+def test_for_inventory_uses_per_host_ecosystem():
+    # Two hosts on different releases -> OSV queried under each host's ecosystem.
+    http = FakeHttp()
+    feed = OsvFeed(http, ecosystem="DEFAULT")            # default is only a fallback
+    inv = [
+        HostFindings("h1", {"openssl": "1.1.1"}, ecosystem="Ubuntu:18.04:LTS"),
+        HostFindings("h2", {"bash": "5.1"}, ecosystem="Debian:12"),
+        HostFindings("h3", {"curl": "7.0"}),            # no ecosystem -> default
+    ]
+    feed.for_inventory(inv)
+    ecos = {(q["package"]["name"], q["package"]["ecosystem"])
+            for q in http.posts[0][1]["queries"]}
+    assert ("openssl", "Ubuntu:18.04:LTS") in ecos
+    assert ("bash", "Debian:12") in ecos
+    assert ("curl", "DEFAULT") in ecos                  # fell back to the configured default

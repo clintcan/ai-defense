@@ -19,6 +19,7 @@ class HostFindings:
     installed_packages: dict[str, str] = field(default_factory=dict)   # name -> version
     applied_patches: list[str] = field(default_factory=list)
     misconfigurations: list[str] = field(default_factory=list)         # e.g. OVAL fails
+    ecosystem: str | None = None   # OSV distro ecosystem for this host, e.g. "Ubuntu:22.04:LTS"
 
 
 class HostInspector(Protocol):
@@ -39,6 +40,7 @@ class AuthenticatedScanner:
             installed_packages=dict(raw.get("installed_packages", {})),
             applied_patches=list(raw.get("applied_patches", [])),
             misconfigurations=list(raw.get("misconfigurations", [])),
+            ecosystem=raw.get("ecosystem"),
         )
 
     def scan_hosts(self, asset_ids: list[str]) -> list[HostFindings]:

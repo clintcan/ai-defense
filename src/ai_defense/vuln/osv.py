@@ -52,13 +52,17 @@ class OsvFeed(AdvisoryFeed):
         return []
 
     def for_inventory(self, inventory) -> list[Advisory]:
-        pkgs = sorted({(name, ver)
-                       for hf in inventory
-                       for name, ver in hf.installed_packages.items()})
-        if not pkgs:
+        # Query each host's packages under that host's own OSV ecosystem
+        # (detected from /etc/os-release); fall back to the configured default.
+        triples = sorted({
+            (getattr(hf, "ecosystem", None) or self._ecosystem, name, ver)
+            for hf in inventory
+            for name, ver in hf.installed_packages.items()
+        })
+        if not triples:
             return []
-        queries = [{"package": {"name": n, "ecosystem": self._ecosystem}, "version": v}
-                   for n, v in pkgs]
+        queries = [{"package": {"name": n, "ecosystem": eco}, "version": v}
+                   for eco, n, v in triples]
         resp = self._http.post_json(f"{self._base}/v1/querybatch", {"queries": queries})
 
         advisories: dict[str, Advisory] = {}

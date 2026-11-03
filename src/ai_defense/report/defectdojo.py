@@ -15,6 +15,11 @@ parser ingests directly. Mapping (see CLAUDE.md "Reporting & export"):
 
 ``active`` is True (all reported findings are open) and ``verified`` is True
 (observed on the host by an authenticated scan, not inferred).
+
+When the advisory feed degraded for this run (``provenance.feed_degraded``),
+every finding is additionally tagged ``scan-degraded``: the scan was incomplete,
+so a reimport must run with auto-close **disabled** — otherwise DefectDojo would
+close real findings this partial scan never saw (CLAUDE.md §8, hard rule #7).
 """
 
 from __future__ import annotations
@@ -64,16 +69,21 @@ def _endpoint(asset: ReportAsset) -> str:
     return asset.asset_id
 
 
-def _tags(f: ReportFinding) -> list[str]:
+def _tags(f: ReportFinding, *, degraded: bool = False) -> list[str]:
     tags = ["ai-defense", f.kind]
     if f.kev:
         tags.append("kev")
     if f.requires_human:
         tags.append("needs-approval")
+    if degraded:
+        # This finding came from an incomplete scan; the importer must not
+        # auto-close findings absent from a degraded run (CLAUDE.md §8).
+        tags.append("scan-degraded")
     return tags
 
 
-def _finding(f: ReportFinding, asset: ReportAsset, date: str) -> dict:
+def _finding(f: ReportFinding, asset: ReportAsset, date: str,
+             *, degraded: bool = False) -> dict:
     out = {
         "title": _title(f),
         "description": _description(f, asset),
@@ -87,7 +97,7 @@ def _finding(f: ReportFinding, asset: ReportAsset, date: str) -> dict:
         "component_version": f.installed_version,
         "active": True,
         "verified": True,
-        "tags": _tags(f),
+        "tags": _tags(f, degraded=degraded),
         # DefectDojo Endpoint = the real address when known, else the asset name.
         "endpoints": [_endpoint(asset)],
     }
@@ -100,8 +110,9 @@ def _finding(f: ReportFinding, asset: ReportAsset, date: str) -> dict:
 
 def to_defectdojo(report: Report) -> dict:
     date = report.provenance.generated_at.date().isoformat()
+    degraded = report.provenance.feed_degraded
     findings = [
-        _finding(f, a, date)
+        _finding(f, a, date, degraded=degraded)
         for a in report.assets
         for f in a.findings
     ]

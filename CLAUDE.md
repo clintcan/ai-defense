@@ -328,7 +328,7 @@ emits four deliverables:
   ```
   { tool, schema_version, generated_at,
     provenance: { scope[], advisory_source, kev_enabled, scan_mode,
-                  audit_verified },
+                  audit_verified, feed_degraded, feed_note },
     summary:    { assets, findings, by_kind{}, by_severity{}, kev, eol_assets[] },
     assets: [ { asset_id, os, ecosystem, support_status,
                 upgrade: { verdict, target, path[] },
@@ -342,6 +342,17 @@ emits four deliverables:
   artifact records when, what scope, which advisory source, whether KEV was
   applied, the scan mode, and the audit-chain verification — so a report is
   itself auditable.
+- **Fail-safe on a degraded advisory feed (hard rule #7).** The OSV feed degrades
+  on error rather than aborting a fleet sweep (a failed query batch is skipped, a
+  failed detail fetch drops that one advisory). When that happens the fetch is
+  *incomplete*, and a report built on it must never read as a clean bill of
+  health. The feed reports its completeness (`OsvFeed.health`); the engine threads
+  it into provenance as `feed_degraded` / `feed_note`. On a degraded run every
+  artifact says so: the Markdown reports carry a loud banner, the generic JSON
+  sets `feed_degraded: true`, and **every DefectDojo finding is tagged
+  `scan-degraded`** — a degraded import must be run with auto-close **disabled**,
+  because the findings the partial scan missed are exactly the ones DefectDojo
+  would otherwise close as "fixed".
 
 ---
 

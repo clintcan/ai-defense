@@ -167,6 +167,72 @@ def test_for_inventory_degrades_on_batch_and_detail_errors():
     assert [a.cve_id for a in advs] == ["CVE-2030-1"]    # bad one dropped, no crash
 
 
+# --- feed health (fail-safe: a degraded fetch must be detectable) -------
+
+def test_feed_health_clean_when_everything_succeeds():
+    feed = OsvFeed(FakeHttp(), ecosystem="Debian")
+    feed.for_inventory([HostFindings("h1", {"openssl": "3.0.5"})])
+    assert feed.health.degraded is False
+    assert feed.health.summary() is None
+    assert feed.health.batches_failed == 0 and feed.health.details_failed == 0
+
+
+def test_feed_health_flags_a_failed_batch():
+    class _Http:
+        def post_json(self, url, body):
+            raise OSError("osv unreachable")
+
+        def get_json(self, url):
+            raise AssertionError("no details should be fetched when the batch failed")
+
+    feed = OsvFeed(_Http())
+    advs = feed.for_inventory([HostFindings("h1", {"p": "1"})])
+    assert advs == []                                   # degrade: no advisories
+    assert feed.health.degraded is True
+    assert feed.health.batches_total == 1 and feed.health.batches_failed == 1
+    assert "query batch" in feed.health.summary()
+
+
+def test_feed_health_flags_a_failed_detail():
+    class _Http:
+        def post_json(self, url, body):
+            return {"results": [{"vulns": [{"id": "OSV-GOOD"}, {"id": "OSV-BAD"}]}]}
+
+        def get_json(self, url):
+            if url.endswith("OSV-BAD"):
+                raise OSError("rate limited")
+            return {"id": "OSV-GOOD", "aliases": ["CVE-2030-1"],
+                    "affected": [{"package": {"name": "p"}}]}
+
+    feed = OsvFeed(_Http(), max_workers=4)
+    feed.for_inventory([HostFindings("h1", {"p": "1"})])
+    assert feed.health.degraded is True
+    assert feed.health.details_total == 2 and feed.health.details_failed == 1
+    assert "detail fetch" in feed.health.summary()
+
+
+def test_feed_health_resets_between_runs():
+    # a degraded run followed by a healthy one must not stay flagged.
+    class _Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def post_json(self, url, body):
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError("down")
+            return {"results": [{} for _ in body["queries"]]}   # healthy, no vulns
+
+        def get_json(self, url):
+            raise AssertionError("no vulns -> no detail fetch")
+
+    feed = OsvFeed(_Flaky())
+    feed.for_inventory([HostFindings("h1", {"p": "1"})])
+    assert feed.health.degraded is True
+    feed.for_inventory([HostFindings("h1", {"p": "1"})])
+    assert feed.health.degraded is False                # cleared on the next call
+
+
 def test_detail_fetch_dedupes_and_parallelizes():
     # Three packages; two share the SAME vuln id. Detail must be fetched once per
     # UNIQUE id (2 GETs, not 3), and all distinct advisories returned.

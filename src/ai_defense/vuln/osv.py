@@ -12,6 +12,7 @@ import concurrent.futures as cf
 import json
 import re
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -22,6 +23,41 @@ _DEFAULT_WORKERS = 8
 _MAX_BATCH = 1000          # OSV querybatch rejects > 1000 queries per request (HTTP 400)
 
 _CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}")
+
+
+@dataclass
+class FeedHealth:
+    """How complete the last ``for_inventory`` fetch was.
+
+    The OSV feed degrades on error — a failed query batch is skipped, a failed
+    detail fetch drops just that advisory — so one transient failure or rate
+    limit can't sink a whole fleet report. But a report built on a *degraded*
+    fetch is INCOMPLETE, and must declare that rather than read as a clean bill
+    of health (CLAUDE.md hard rule #7: fail safe; on a missing/partial source,
+    flag it, never guess). The engine reads this into the report provenance.
+    """
+
+    batches_total: int = 0
+    batches_failed: int = 0
+    details_total: int = 0
+    details_failed: int = 0
+
+    @property
+    def degraded(self) -> bool:
+        return self.batches_failed > 0 or self.details_failed > 0
+
+    def summary(self) -> str | None:
+        """A human-readable reason string when degraded, else ``None``."""
+        if not self.degraded:
+            return None
+        parts: list[str] = []
+        if self.batches_failed:
+            parts.append(f"{self.batches_failed} of {self.batches_total} "
+                         "OSV query batch(es) failed")
+        if self.details_failed:
+            parts.append(f"{self.details_failed} of {self.details_total} "
+                         "advisory detail fetch(es) failed")
+        return "; ".join(parts)
 
 
 class HttpClient(Protocol):
@@ -54,12 +90,17 @@ class OsvFeed(AdvisoryFeed):
         self._ecosystem = ecosystem
         self._base = base_url.rstrip("/")
         self._max_workers = max(1, max_workers)
+        # Completeness of the most recent for_inventory call (see FeedHealth).
+        self.health = FeedHealth()
 
     def fetch(self, since: datetime | None = None) -> list[Advisory]:
         # OSV is query-by-package, not a global listing.
         return []
 
     def for_inventory(self, inventory) -> list[Advisory]:
+        # Fresh health for this call; a prior degraded run must not linger.
+        self.health = FeedHealth()
+
         # Query each host's packages under that host's own OSV ecosystem
         # (detected from /etc/os-release); fall back to the configured default.
         triples = sorted({
@@ -74,15 +115,18 @@ class OsvFeed(AdvisoryFeed):
 
         # OSV caps querybatch at _MAX_BATCH queries, so a fleet scan must be
         # chunked. A failed chunk is skipped (degrade, not abort) so one bad
-        # request can't sink the whole report. The same vuln id recurs across
-        # packages and rows, so we dedupe to the UNIQUE set before fetching
-        # details — the per-vuln GETs are the expensive leg.
+        # request can't sink the whole report — but we record the failure in
+        # self.health so the report can flag that it is incomplete. The same
+        # vuln id recurs across packages and rows, so we dedupe to the UNIQUE
+        # set before fetching details — the per-vuln GETs are the expensive leg.
         vuln_ids: set[str] = set()
         for start in range(0, len(queries), _MAX_BATCH):
+            self.health.batches_total += 1
             chunk = queries[start:start + _MAX_BATCH]
             try:
                 resp = self._http.post_json(f"{self._base}/v1/querybatch", {"queries": chunk})
             except Exception:  # noqa: BLE001 - skip a failed batch, keep the rest
+                self.health.batches_failed += 1
                 continue
             vuln_ids.update(
                 v["id"]
@@ -94,6 +138,8 @@ class OsvFeed(AdvisoryFeed):
             return []
         ordered = sorted(vuln_ids)
         details = self._fetch_details(ordered)
+        self.health.details_total = len(ordered)
+        self.health.details_failed = sum(1 for d in details.values() if d is None)
 
         # Build keyed by canonical CVE; iterate sorted ids so the winner for a
         # given CVE is deterministic regardless of fetch-completion order.

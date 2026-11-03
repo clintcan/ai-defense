@@ -174,9 +174,16 @@ class Engine:
         scan_mode = ("authenticated"
                      if isinstance(self.scanner.inspector, SSHHostInspector)
                      else "simulated")
+        # for_inventory was just run during build_report, so the feed's health
+        # reflects this report. A degraded advisory fetch (OSV down/rate-limited)
+        # must be flagged — otherwise a report missing findings reads as clean.
+        health = getattr(inner, "health", None)
+        degraded = bool(health is not None and health.degraded)
+        note = health.summary() if degraded else None
         return ReportProvenance(generated_at=self.clock(), scope=list(scope),
                                 advisory_source=source, kev_enabled=kev,
-                                scan_mode=scan_mode)
+                                scan_mode=scan_mode,
+                                feed_degraded=degraded, feed_note=note)
 
     def remediate(self, item: RemediationItem, *, snapshot: bool | None = None,
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:

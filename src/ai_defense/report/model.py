@@ -84,6 +84,8 @@ class ReportProvenance:
     scan_mode: str = "authenticated"      # authenticated host scan vs. simulated
     tool: str = "ai-defense"
     schema_version: str = SCHEMA_VERSION
+    feed_degraded: bool = False           # advisory fetch was incomplete this run
+    feed_note: str | None = None          # how it degraded (for the report banner)
 
 
 @dataclass(frozen=True)

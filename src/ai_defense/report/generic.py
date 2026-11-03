@@ -8,7 +8,7 @@ Schema (``schema_version`` 1.0) — self-describing and stable; see CLAUDE.md
       "schema_version": "1.0",
       "generated_at": "<ISO-8601 UTC>",
       "provenance": { scope, advisory_source, kev_enabled, scan_mode,
-                      audit_verified },
+                      audit_verified, feed_degraded, feed_note },
       "summary": { assets, findings, by_kind{}, by_severity{}, kev,
                    eol_assets },
       "assets": [
@@ -54,6 +54,8 @@ def to_generic(report: Report) -> dict:
             "kev_enabled": p.kev_enabled,
             "scan_mode": p.scan_mode,
             "audit_verified": report.audit_verified,
+            "feed_degraded": p.feed_degraded,
+            "feed_note": p.feed_note,
         },
         "summary": {
             "assets": len(report.assets),

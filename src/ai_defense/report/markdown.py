@@ -26,6 +26,28 @@ def _provenance_line(report: Report) -> str:
     return " · ".join(bits)
 
 
+def _degraded_banner(report: Report) -> list[str]:
+    """A loud, impossible-to-miss warning when the advisory feed was incomplete.
+
+    A report built on a partial OSV fetch must not be mistaken for a clean bill
+    of health (hard rule #7). It also warns against the one dangerous downstream
+    action: reimporting the DefectDojo file with auto-close on would close real
+    findings this partial scan simply didn't see."""
+    p = report.provenance
+    if not p.feed_degraded:
+        return []
+    note = p.feed_note or "the advisory feed did not return all data"
+    return [
+        "",
+        f"> 🛑 **Advisory feed DEGRADED — this report is INCOMPLETE.** {note}. "
+        "Findings may be missing: the absence of a finding here does **not** mean a "
+        "host is clean. Re-run before treating this as a clean bill of health, and do "
+        "**not** reimport the DefectDojo file with auto-close enabled — it would close "
+        "real findings this partial scan missed.",
+        "",
+    ]
+
+
 # --- executive summary ---------------------------------------------------
 
 def executive_summary_md(report: Report) -> str:
@@ -48,6 +70,7 @@ def executive_summary_md(report: Report) -> str:
         out.append(f"> ⚠ **{len(failed)} host(s) could not be scanned** (not counted above): "
                    + ", ".join(f"{a.asset_id}" + (f" ({a.host})" if a.host else "")
                                for a in failed) + ".")
+    out.extend(_degraded_banner(report))
     out.append("")
 
     # Headline risk.
@@ -114,6 +137,7 @@ def technical_report_md(report: Report) -> str:
     out.append("# Vulnerability Technical Report")
     out.append("")
     out.append(f"_{_provenance_line(report)}_")
+    out.extend(_degraded_banner(report))
     out.append("")
     out.append(f"Scope: {', '.join(report.provenance.scope) or '(none)'}")
     out.append("")

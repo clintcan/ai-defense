@@ -218,3 +218,55 @@ def test_mcp_report_returns_paths_and_summary(tmp_path):
     assert out["summary"]["kev"] == 1
     assert out["summary"]["by_kind"]["patch"] == 1
     assert os.path.isdir(out["out_dir"])
+
+
+# --- fail-safe: a degraded advisory feed must be surfaced ---------------
+
+class _DeadOsvHttp:
+    """Every OSV query batch fails -> for_inventory degrades to no advisories."""
+
+    def post_json(self, url, body):
+        raise OSError("osv unreachable")
+
+    def get_json(self, url):
+        raise AssertionError("no details fetched when every batch failed")
+
+
+def test_report_provenance_flags_feed_degradation():
+    from ai_defense.vuln.osv import OsvFeed
+
+    eng = build_demo_engine(advisory_feed=OsvFeed(_DeadOsvHttp()))
+    report = eng.build_report(["any-host"])
+    # Feed was down: zero findings, but the report must NOT look clean.
+    assert report.all_findings == []
+    assert report.provenance.feed_degraded is True
+    assert "query batch" in (report.provenance.feed_note or "")
+    # ...and it propagates into every artifact.
+    assert "DEGRADED" in executive_summary_md(report)
+    assert "DEGRADED" in technical_report_md(report)
+    assert to_generic(report)["provenance"]["feed_degraded"] is True
+
+
+def test_degraded_banner_and_defectdojo_tag():
+    prov = ReportProvenance(
+        generated_at=datetime(2026, 11, 4, 12, 0, 0), scope=["h1"],
+        advisory_source="osv.dev", kev_enabled=True,
+        feed_degraded=True, feed_note="1 of 3 OSV query batch(es) failed")
+    report = Report(
+        provenance=prov,
+        assets=[ReportAsset(asset_id="h1", host="1.1.1.1", findings=[_finding()])])
+    exec_md = executive_summary_md(report)
+    assert "DEGRADED" in exec_md
+    assert "1 of 3 OSV query batch(es) failed" in exec_md
+    assert "auto-close" in exec_md                        # warns off the dangerous import
+    assert "DEGRADED" in technical_report_md(report)
+    assert to_generic(report)["provenance"]["feed_note"].startswith("1 of 3")
+    assert "scan-degraded" in to_defectdojo(report)["findings"][0]["tags"]
+
+
+def test_clean_report_has_no_degradation_signal():
+    r = _report()                                         # provenance defaults: not degraded
+    assert "DEGRADED" not in executive_summary_md(r)
+    assert "DEGRADED" not in technical_report_md(r)
+    assert to_generic(r)["provenance"]["feed_degraded"] is False
+    assert "scan-degraded" not in to_defectdojo(r)["findings"][0]["tags"]

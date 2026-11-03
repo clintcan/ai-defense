@@ -250,6 +250,39 @@ selects every registered `ssh-host` asset (cloud-account and control-plane
 assets are not SSH-scannable), so onboard your hosts first (and point `--db` at
 the database they were onboarded into). Reports are written locally only.
 
+## Bulk onboarding (fill the fleet from cloud discovery)
+
+`report --all` only covers hosts that are **registered**. To turn your
+discovered cloud instances into `ssh-host` assets in one shot, use
+`bulk-onboard` (an operator / out-of-band action — you supply the authorization
+attestation, exactly like `register-vps`, just many hosts at once). The SSH
+keys must already be in the vault; only a `key_ref` is stored, never a key.
+
+```bat
+REM 1. preview from a saved cloud_discover output (no DB needed for --dry-run)
+ai-defense bulk-onboard --from-json discovered.json --dry-run ^
+  --owner secops --granted-by clint --attestation-sig "ticket-4821" ^
+  --key-ref "ssh-key/lightsail-default"
+
+REM 2. discover live from a registered account, then write to the DB
+ai-defense bulk-onboard --account 123456789012 --aws-region us-east-1 ^
+  --db "sqlite+pysqlite:///D:/.../ai.db" ^
+  --owner secops --granted-by clint --attestation-sig "ticket-4821" ^
+  --key-ref "ssh-key/lightsail-default"
+```
+
+- Input is either `--from-json FILE` (a `cloud_discover` result — `{"instances":[…]}`
+  or a bare list) or `--account ID` for live discovery (EC2 + Lightsail).
+- The **SSH user is inferred** from each instance's platform/blueprint
+  (`ubuntu_*`→`ubuntu`, `debian_*`→`admin`, `amazon_*`→`ec2-user`,
+  WordPress/LAMP/Bitnami→`bitnami`, …); override with `--user`.
+- **One key for all** via `--key-ref`, or **per-host** via `--key-ref-map FILE`
+  (`{"asset-id": "ssh-key/ref"}`). A host with no key reference, or no reachable
+  address, is **skipped** and listed — never guessed around.
+- `--environment` tags all hosts (otherwise each instance's `env` tag, else
+  `unknown`). `--dry-run` previews; without it (and with `--db`) the signed
+  registrations are persisted. Afterwards, `report --all` covers the fleet.
+
 ## Real SSH mode (patch actual hosts)
 
 By default the server uses **simulated** backends (nothing touches real hosts).

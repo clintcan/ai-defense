@@ -1,11 +1,12 @@
 """`python -m ai_defense` — operator entrypoint.
 
 Subcommands:
-  demo      Run the full lifecycle locally against the demo backends (no infra).
-  mcp       Run the MCP server over stdio.
-  report    Scan asset(s) and write vulnerability reports to local files.
-  pending   List approval change-sets in a DB.
-  approve   Approve a pending change-set.
+  demo          Run the full lifecycle locally against the demo backends (no infra).
+  mcp           Run the MCP server over stdio.
+  report        Scan asset(s) and write vulnerability reports to local files.
+  bulk-onboard  Register discovered cloud instances as ssh-host assets (operator).
+  pending       List approval change-sets in a DB.
+  approve       Approve a pending change-set.
 """
 
 from __future__ import annotations
@@ -96,6 +97,68 @@ def _run_report(args) -> int:
     return 0
 
 
+def _load_instances(args, engine) -> list[dict]:
+    if args.from_json:
+        import json
+        with open(args.from_json, encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data.get("instances", []) if isinstance(data, dict) else list(data)
+    # live discovery via a registered cloud account (EC2 + Lightsail)
+    ec2, ls = engine.cloud_discover(args.account)
+    instances: list[dict] = []
+    for r in (ec2, ls):
+        if r.ok:
+            instances += r.data.get("instances", [])
+        else:
+            print(f"  discovery warning: {r.summary}")
+    return instances
+
+
+def _run_bulk_onboard(args) -> int:
+    import json
+
+    from .onboarding import onboard_instances
+
+    if not args.from_json and not args.account:
+        print("specify an input: --from-json FILE or --account ACCOUNT_ID (live discovery)")
+        return 1
+    if not args.dry_run and not args.db:
+        print("refusing to onboard without --db (registrations would not persist); "
+              "add --db, or use --dry-run to preview")
+        return 1
+
+    engine = _engine_from_args(args)
+    instances = _load_instances(args, engine)
+    if not instances:
+        print("no instances to onboard")
+        return 1
+
+    key_map: dict[str, str] = {}
+    if args.key_ref_map:
+        with open(args.key_ref_map, encoding="utf-8") as fh:
+            key_map = json.load(fh)
+
+    result = onboard_instances(
+        instances, engine.registry.register,
+        owner=args.owner, granted_by=args.granted_by, attestation_sig=args.attestation_sig,
+        environment=args.environment, default_key_ref=args.key_ref, key_ref_by_name=key_map,
+        user=args.user, port=args.port, ttl_days=args.ttl_days, dry_run=args.dry_run,
+    )
+
+    verb = "would register" if args.dry_run else "registered"
+    print(f"{verb} {len(result['registered'])} host(s):")
+    for r in result["registered"]:
+        print(f"  {r['asset_id']:<24} {r['user']}@{r['host']}  env={r['environment']}  "
+              f"key_ref={r['key_ref']}  [{r['service']}]")
+    if result["skipped"]:
+        print(f"\nskipped {len(result['skipped'])}:")
+        for s in result["skipped"]:
+            print(f"  {s['instance']}: {s['reason']}")
+    if args.dry_run:
+        print("\n(dry run — nothing written; re-run without --dry-run to persist)")
+    return 0
+
+
 def _run_pending(db: str) -> int:
     from .db import init_db
     from .db.repositories import ApprovalRepository
@@ -141,6 +204,32 @@ def main(argv: list[str] | None = None) -> int:
                           help="directory to write into (default: ./reports/<timestamp>)")
     _add_engine_args(p_report)
 
+    p_bulk = sub.add_parser(
+        "bulk-onboard",
+        help="register discovered cloud instances as ssh-host assets (operator)")
+    g_in = p_bulk.add_argument_group("input (choose one)")
+    g_in.add_argument("--from-json",
+                      help="JSON file of discovered instances ({\"instances\":[...]} or a list)")
+    g_in.add_argument("--account",
+                      help="registered cloud account id -> discover instances live")
+    p_bulk.add_argument("--owner", required=True)
+    p_bulk.add_argument("--granted-by", required=True)
+    p_bulk.add_argument("--attestation-sig", required=True,
+                        help="the operator's authorization attestation for these hosts")
+    p_bulk.add_argument("--environment", default=None,
+                        help="environment tag for all (default: each instance's 'env' tag "
+                             "else 'unknown')")
+    p_bulk.add_argument("--key-ref", default=None,
+                        help="vault key ref for all hosts (key already stored in the vault)")
+    p_bulk.add_argument("--key-ref-map", default=None,
+                        help="JSON file mapping asset_id -> key_ref (per-host keys)")
+    p_bulk.add_argument("--user", default=None,
+                        help="SSH user override (default: inferred from platform/blueprint)")
+    p_bulk.add_argument("--port", type=int, default=22)
+    p_bulk.add_argument("--ttl-days", type=int, default=90)
+    p_bulk.add_argument("--dry-run", action="store_true", help="preview without writing")
+    _add_engine_args(p_bulk)
+
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)
 
@@ -157,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_mcp(args)
     if args.command == "report":
         return _run_report(args)
+    if args.command == "bulk-onboard":
+        return _run_bulk_onboard(args)
     if args.command == "pending":
         return _run_pending(args.db)
     if args.command == "approve":

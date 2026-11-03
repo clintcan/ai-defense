@@ -82,7 +82,11 @@ command *that would run*, never the secrets behind it.
   disable write actions on that asset until renewed.
 - **Onboarding is the trust root, so it is human-anchored.** Two paths:
   - *Operator (out-of-band):* `onboarding.register_ssh_host` / the `register-vps`
-    CLI — a person registers a VPS and supplies the attestation.
+    CLI — a person registers a VPS and supplies the attestation. For a fleet, the
+    `bulk-onboard` CLI (`onboarding.onboard_instances`) registers many hosts from
+    cloud-discovery output in one operator-run pass (SSH user inferred from each
+    image's blueprint; the key stays in the vault, referenced by `key_ref`; hosts
+    with no key or no address are skipped, never guessed).
   - *LLM-proposed (approval-gated):* the `asset.register` tool (capability
     MUTATING, `ONBOARD` action class). The model drafts only non-secret details;
     the SSH key is pre-loaded into the vault and referenced by `key_ref` (the

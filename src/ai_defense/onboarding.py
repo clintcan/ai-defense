@@ -54,6 +54,88 @@ def register_ssh_host(repo, **kwargs) -> Asset:
     return asset
 
 
+# SSH login user by cloud image family (substring match on the platform /
+# Lightsail blueprint id). Covers the common AWS images; override with --user.
+_USER_BY_PLATFORM: list[tuple[str, str]] = [
+    ("ubuntu", "ubuntu"),
+    ("debian", "admin"),
+    ("amazon", "ec2-user"),
+    ("amzn", "ec2-user"),
+    ("rhel", "ec2-user"),
+    ("centos", "centos"),
+    ("fedora", "fedora"),
+    ("suse", "ec2-user"),
+    ("bitnami", "bitnami"),
+    ("wordpress", "bitnami"),
+    ("lamp", "bitnami"),
+    ("nginx", "bitnami"),
+    ("plesk", "ubuntu"),
+]
+
+
+def infer_ssh_user(platform: str | None, default: str = "ubuntu") -> str:
+    """Best-effort SSH user for a discovered instance's platform/blueprint.
+
+    It's only a guess (the operator can override with ``user=``); getting it
+    wrong fails the scan loudly rather than doing anything unsafe."""
+    p = (platform or "").lower()
+    for key, user in _USER_BY_PLATFORM:
+        if key in p:
+            return user
+    return default
+
+
+def onboard_instances(
+    instances: list[dict], register: Callable[[Asset], None], *,
+    owner: str, granted_by: str, attestation_sig: str,
+    environment: str | None = None,
+    default_key_ref: str | None = None, key_ref_by_name: dict[str, str] | None = None,
+    user: str | None = None, port: int = 22, ttl_days: int = 90,
+    now: datetime | None = None, dry_run: bool = False,
+) -> dict:
+    """Operator bulk onboarding (option 1, out-of-band) from discovered cloud
+    instances (the normalized dicts ``cloud_discover`` returns).
+
+    One signed ssh-host registration per instance. A host is **skipped** (never
+    guessed around) when it lacks a reachable address or a ``key_ref`` — the SSH
+    private key must already be in the vault; only the reference is stored, never
+    the key. ``dry_run`` builds and reports the registrations without writing.
+    Returns ``{registered: [...], skipped: [{instance, reason}], dry_run}``."""
+    now = now or _utcnow()
+    key_map = key_ref_by_name or {}
+    registered: list[dict] = []
+    skipped: list[dict] = []
+
+    for inst in instances:
+        name = inst.get("name") or inst.get("instance_id")
+        if not name:
+            skipped.append({"instance": "<unnamed>", "reason": "no name/instance_id"})
+            continue
+        host = inst.get("public_ip") or inst.get("private_ip")
+        if not host:
+            skipped.append({"instance": name, "reason": "no public_ip or private_ip"})
+            continue
+        key_ref = key_map.get(name, default_key_ref)
+        if not key_ref:
+            skipped.append({"instance": name,
+                            "reason": "no key_ref (pass --key-ref or a --key-ref-map entry)"})
+            continue
+
+        env = environment or (inst.get("tags") or {}).get("env") or "unknown"
+        ssh_user = user or infer_ssh_user(inst.get("platform"))
+        asset = build_ssh_asset(
+            asset_id=name, host=host, key_ref=key_ref, owner=owner, environment=env,
+            granted_by=granted_by, attestation_sig=attestation_sig,
+            user=ssh_user, port=port, ttl_days=ttl_days, now=now,
+        )
+        if not dry_run:
+            register(asset)
+        registered.append({"asset_id": name, "host": host, "user": ssh_user,
+                           "environment": env, "key_ref": key_ref,
+                           "service": inst.get("service")})
+    return {"registered": registered, "skipped": skipped, "dry_run": dry_run}
+
+
 def make_asset_register_tool(register_fn: Callable[[Asset], None]) -> ToolSpec:
     """Option 2: an LLM-proposable, approval-gated onboarding tool.
 

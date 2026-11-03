@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 GENESIS = "GENESIS"
 
@@ -44,33 +44,57 @@ class AuditRecord:
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-class AuditLog:
-    """In-memory hash chain. Swap the storage for an append-only store in prod."""
+class AuditStore(Protocol):
+    """Pluggable backing store for the hash chain. The in-memory default is used
+    unless a durable store (e.g. ``db.repositories.SqlAuditStore``) is injected."""
 
-    def __init__(self, clock: Callable[[], datetime] = _utcnow) -> None:
+    def append(self, rec: AuditRecord) -> None: ...
+    def all(self) -> list[AuditRecord]: ...
+    def last_hash(self) -> str: ...
+
+
+class InMemoryAuditStore:
+    def __init__(self) -> None:
         self._records: list[AuditRecord] = []
+
+    def append(self, rec: AuditRecord) -> None:
+        self._records.append(rec)
+
+    def all(self) -> list[AuditRecord]:
+        return list(self._records)
+
+    def last_hash(self) -> str:
+        return self._records[-1].this_hash if self._records else GENESIS
+
+
+class AuditLog:
+    """Append-only hash chain over a pluggable store (in-memory by default)."""
+
+    def __init__(self, clock: Callable[[], datetime] = _utcnow,
+                 store: AuditStore | None = None) -> None:
+        self._store: AuditStore = store or InMemoryAuditStore()
         self._clock = clock
 
     @property
     def last_hash(self) -> str:
-        return self._records[-1].this_hash if self._records else GENESIS
+        return self._store.last_hash()
 
     def record(self, actor: str, event: str, payload: dict[str, Any]) -> AuditRecord:
         ts = self._clock()
-        prev = self.last_hash
+        prev = self._store.last_hash()
         this = AuditRecord.compute_hash(prev, ts, actor, event, payload)
         rec = AuditRecord(ts=ts, actor=actor, event=event, payload=payload,
                           prev_hash=prev, this_hash=this)
-        self._records.append(rec)
+        self._store.append(rec)
         return rec
 
     def records(self) -> list[AuditRecord]:
-        return list(self._records)
+        return self._store.all()
 
     def verify(self) -> bool:
         """Recompute the chain; any break (tamper) returns False."""
         prev = GENESIS
-        for rec in self._records:
+        for rec in self._store.all():
             expect = AuditRecord.compute_hash(prev, rec.ts, rec.actor, rec.event, rec.payload)
             if rec.prev_hash != prev or rec.this_hash != expect:
                 return False

@@ -3,3 +3,24 @@ asset registry, authorization ledger, approvals, scan findings, and audit log.
 Never stores plaintext secrets. See .gitignore for files that must never be
 committed.
 """
+
+from .database import create_all, init_db, make_engine, make_session_factory
+from .repositories import (
+    ApprovalRepository,
+    AssetRepository,
+    ScanFindingRepository,
+    SecretRefRepository,
+    SqlAuditStore,
+)
+
+__all__ = [
+    "init_db",
+    "make_engine",
+    "create_all",
+    "make_session_factory",
+    "AssetRepository",
+    "ApprovalRepository",
+    "ScanFindingRepository",
+    "SecretRefRepository",
+    "SqlAuditStore",
+]

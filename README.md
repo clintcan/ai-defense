@@ -29,10 +29,20 @@ tests/        denylist + authorization safety tests
 
 ## Status
 
-Scaffold. Modules define the component boundaries and interfaces; execution
-pipelines raise `NotImplementedError` pending implementation. Two safety
-behaviors already have tests: the destructive-command denylist and the
-unregistered/expired-authorization refusal.
+Working vertical slice. Implemented and tested end to end:
+
+- **Toolset dispatch pipeline** — validate → capability check → authorize →
+  policy → approval gate → resolve secrets → execute → redact → audit.
+- **SSH executor** on a pluggable transport with catalog-only commands,
+  denylist, dry-run-first, output caps, and a first `mutating` tool
+  (`patch.apply_security_update`).
+- **Persistence** (`db/`, SQLAlchemy 2.0) — assets/authorizations, secret
+  *references* (ciphertext only), approvals + votes, scan findings, advisories/
+  remediations, and a durable hash-chained audit log that still `verify()`s
+  after reload.
+
+Still stubbed: cloud adapters, the vuln feeds/planner, the scanner internals,
+and policy rate-limiting. Run `pytest` (52 tests) and `ruff check src tests`.
 
 ## Dev
 

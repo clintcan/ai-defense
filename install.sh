@@ -11,9 +11,30 @@ EXTRAS="${1:-dev,mcp}"
 VENV="${VENV:-.venv}"
 cd "$(dirname "$0")"
 
+# Find a real Python 3 interpreter (skip the Windows Store alias stub).
+BOOT=""
+for cand in python3 python py; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        if "$cand" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 11) else 1)' >/dev/null 2>&1; then
+            BOOT="$cand"
+            break
+        fi
+    fi
+done
+if [ -z "$BOOT" ]; then
+    echo "error: no Python >= 3.11 found on PATH (tried python3, python, py)" >&2
+    exit 1
+fi
+echo ">> Using interpreter: $($BOOT -c 'import sys; print(sys.executable)')"
+
 echo ">> Creating virtualenv in $VENV"
-python3 -m venv "$VENV"
-PY="$VENV/bin/python"
+"$BOOT" -m venv "$VENV"
+# venv layout differs: POSIX -> bin/, Windows -> Scripts/
+if [ -x "$VENV/bin/python" ]; then
+    PY="$VENV/bin/python"
+else
+    PY="$VENV/Scripts/python.exe"
+fi
 
 echo ">> Upgrading pip"
 "$PY" -m pip install --upgrade pip >/dev/null

@@ -19,6 +19,12 @@ findings.*.json
 executive-summary.md
 *.sqlite
 *.db
+*.db-wal
+*.db-shm
+*.db.bak*
+*.bak
+*.backup
+ai.db*
 __pycache__/
 *.pyc
 .venv/

@@ -41,4 +41,14 @@ mapping with a top-level `mitigations:` list. Fields:
 | `description` | no | short note shown in the rollback record |
 | `temporary` | no | default `true` (a mitigation is a stopgap until the patch) |
 
-See `pwnkit.yaml` for a complete example.
+## Samples in this folder
+
+| file | mitigation | command (allowlisted) |
+|------|------------|------------------------|
+| `pwnkit.yaml` | CVE-2021-4034 (PwnKit): strip setuid from `pkexec` | `harden.disable_pkexec_suid` |
+| `tcp-sack-panic.yaml` | CVE-2019-11477/11478/11479 (SACK Panic): disable TCP SACK | `harden.disable_tcp_sack` |
+| `mptcp.yaml` | Disable Multipath TCP (attack-surface reduction) | `harden.disable_mptcp` |
+
+Each is a single-mitigation file; put several in one file as a YAML/JSON list if
+you prefer. All are runtime changes (reversible); persist a sysctl one across
+reboot with a drop-in in `/etc/sysctl.d`.

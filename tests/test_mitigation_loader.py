@@ -82,6 +82,21 @@ def test_folder_overrides_builtin(tmp_path):
     assert reg.for_cve("CVE-2021-4034").source_ref == "https://internal/wiki/pwnkit"
 
 
+def test_shipped_mitigations_folder_is_valid():
+    # The committed mitigations/ folder must load cleanly: every entry references
+    # an allowlisted catalog command (no rejections) — a regression guard against
+    # shipping a sample whose command isn't reviewed.
+    import os
+    folder = os.path.join(os.path.dirname(os.path.dirname(__file__)), "mitigations")
+    warns: list[str] = []
+    reg = load_mitigations(folder, allowed_templates=ALLOWED, warn=warns.append)
+    assert warns == [], warns                              # every shipped file must load
+    assert reg.for_cve("CVE-2021-4034") is not None       # pwnkit
+    assert reg.for_cve("CVE-2019-11477") is not None       # SACK Panic (multi-CVE)
+    assert reg.for_cve("CVE-2019-11479") is not None
+    assert reg.for_cve("MPTCP") is not None                # mptcp hardening
+
+
 def test_engine_mitigate_uses_a_folder_entry(tmp_path):
     # a folder file maps an allowlisted command to a NEW cve -> mitigate offers it
     (tmp_path / "extra.yaml").write_text(

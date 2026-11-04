@@ -1,0 +1,16 @@
+# Multipath TCP attack-surface reduction. MPTCP is rarely needed on servers and
+# has carried kernel CVEs; disabling it removes that surface. This is defense in
+# depth, not a single-CVE fix, so it's keyed under a plain hardening id (not a
+# CVE) — run it with:  mitigate <host> MPTCP
+#
+# Both commands are allowlisted in the reviewed catalog (ssh/catalog.py).
+- id: mptcp-disable
+  cves: [MPTCP]
+  title: Disable Multipath TCP (net.mptcp.enabled=0)
+  source_ref: https://docs.kernel.org/networking/mptcp-sysctl.html
+  template: harden.disable_mptcp
+  rollback_template: harden.enable_mptcp
+  description: >-
+    runtime sysctl net.mptcp.enabled=0 (reverse: =1); persist across reboot via
+    a drop-in in /etc/sysctl.d. The dry-run reads the key first, so a kernel
+    without MPTCP aborts rather than erroring blindly.

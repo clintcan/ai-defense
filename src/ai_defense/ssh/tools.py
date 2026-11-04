@@ -384,10 +384,12 @@ def make_os_upgrade_tool(
             swap_out = config_executor.apply(swap, host=conn.host, key=key,
                                              user=conn.user, port=conn.port)
             if not swap_out.applied:
+                v = swap_out.result
                 return ToolResult(
                     ok=False, tool=OS_UPGRADE_TOOL,
                     summary=f"sources.list rewrite failed on {asset_id}: {swap_out.blocked_reason}",
                     data={"blocked_reason": swap_out.blocked_reason, "diff": swap_out.diff,
+                          "stdout": v.stdout if v else "", "stderr": v.stderr if v else "",
                           "rollback": rb_json},
                     resolved_command=swap_out.resolved_command)
 

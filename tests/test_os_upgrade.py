@@ -408,6 +408,7 @@ def test_debian_swap_validate_failure_restores_and_refuses():
     tp = _DebianTransport(apt_update_exit=1)      # apt-get update (the swap's validate) fails
     res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
     assert not res.ok and "sources.list rewrite failed" in res.summary
+    assert "404  Not Found" in res.data["stderr"]      # apt's own error reaches the approver
     assert any(c[0][:3] == ("sudo", "-n", "cp") for c in tp.calls)   # backup/restore ran
     assert not any("full-upgrade" in " ".join(c[0]) for c in tp.calls)  # upgrade never ran
 

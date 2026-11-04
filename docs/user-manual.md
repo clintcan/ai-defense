@@ -405,6 +405,17 @@ The report now tells you *why* in plain terms. The common ones:
 | *SSH authentication rejected — verify user and key_ref* | wrong login name or key | correct it with [update-asset](#11-fixing-a-servers-details-later) |
 | *host key changed (likely rebuilt) — clear the stale known_hosts entry* | the server was rebuilt and now looks "different" | remove its old line from your `known_hosts` file (your terminal's `ssh-keygen -R <address>` does this), then scan again |
 
+**A server is *supposed* to be unreachable over SSH.**
+If a machine is intentionally off-limits to SSH, tell AI Defense to skip it so it
+shows as **exempt** instead of a failure in every report:
+
+```
+ai-defense scan-exempt --db "sqlite+pysqlite:///…/ai.db" --asset-id web-01 --reason "no SSH by design"
+```
+
+Add `--clear` to undo it. Exempt servers aren't scanned and are listed
+separately from real failures.
+
 **"Authorization invalid/expired."**
 A server's authorization has a time limit. Re-onboard it (Step 5) to renew.
 

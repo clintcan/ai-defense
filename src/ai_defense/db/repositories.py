@@ -91,6 +91,29 @@ class AssetRepository:
             s.commit()
             return asset
 
+    def set_scan_exempt(self, asset_id: str, exempt: bool,
+                        reason: str | None = None) -> Asset:
+        """Mark an ssh-host as intentionally not SSH-scanned (or clear it),
+        stored in ``attributes`` — no connection or authorization change. A
+        scan-exempt host is skipped by scans/reports and listed as *exempt*
+        rather than *failed*. Raises if the asset is unknown."""
+        with self._sf() as s:
+            row = s.get(AssetRow, asset_id)
+            if row is None or not row.authorizations:
+                raise KeyError(f"asset not registered: {asset_id}")
+            attrs = dict(row.attributes or {})
+            if exempt:
+                attrs["scan_exempt"] = True
+                if reason:
+                    attrs["scan_exempt_reason"] = reason
+            else:
+                attrs.pop("scan_exempt", None)
+                attrs.pop("scan_exempt_reason", None)
+            row.attributes = attrs                      # reassign so the JSON column is dirtied
+            asset = _to_asset(row)
+            s.commit()
+            return asset
+
     def get(self, asset_id: str) -> Asset | None:
         with self._sf() as s:
             row = s.get(AssetRow, asset_id)
@@ -124,6 +147,10 @@ class PersistentAssetRegistry:
 
     def update_connection(self, asset_id: str, **fields) -> Asset:
         return self._repo.update_connection(asset_id, **fields)
+
+    def set_scan_exempt(self, asset_id: str, exempt: bool,
+                        reason: str | None = None) -> Asset:
+        return self._repo.set_scan_exempt(asset_id, exempt, reason)
 
     def get(self, asset_id: str) -> Asset | None:
         return self._repo.get(asset_id)

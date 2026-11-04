@@ -39,10 +39,12 @@ def build_report(
     *,
     audit_verified: bool | None = None,
     connections: dict[str, dict] | None = None,
+    exempt: dict[str, str] | None = None,
 ) -> Report:
     inv_by_id = {hf.asset_id: hf for hf in inventory}
     pf_by_id = {pf.asset_id: pf for pf in preflight_reports}
     conns = connections or {}
+    exempt = exempt or {}
 
     items_by_asset: dict[str, list[RemediationItem]] = {}
     for it in plan_items:                          # plan is already prioritized
@@ -53,6 +55,9 @@ def build_report(
     for extra in items_by_asset:                   # include any asset only seen in the plan
         if extra not in asset_ids:
             asset_ids.append(extra)
+    for aid in exempt:                             # include scan-exempt hosts (never scanned)
+        if aid not in asset_ids:
+            asset_ids.append(aid)
 
     assets: list[ReportAsset] = []
     for aid in asset_ids:
@@ -71,6 +76,8 @@ def build_report(
             upgrade_path=list(pf.path) if pf else [],
             findings=[_finding(it) for it in items_by_asset.get(aid, [])],
             issues=list(hf.misconfigurations) if hf else [],
+            scan_exempt=aid in exempt,
+            exempt_reason=exempt.get(aid),
         ))
 
     return Report(provenance=provenance, assets=assets, audit_verified=audit_verified)

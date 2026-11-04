@@ -153,15 +153,35 @@ class Engine:
         """Scan + plan (+ preflight), correlated into one read-only report model.
 
         One authenticated scan per host feeds both the vuln plan and the upgrade
-        preflight, so a report is a single consistent snapshot."""
-        inv = [self.scanner.scan_host_for_upgrade(a) for a in asset_ids]
+        preflight, so a report is a single consistent snapshot.
+
+        Scan-exempt hosts (deliberately not SSH-reachable) are not scanned at all;
+        they appear in the report marked *exempt* rather than as a scan failure."""
+        exempt = self._scan_exempt(asset_ids)
+        to_scan = [a for a in asset_ids if a not in exempt]
+        inv = [self.scanner.scan_host_for_upgrade(a) for a in to_scan]
         plan = self.planner.plan(self.feed.for_inventory(inv), inv)
         today = self.clock()
         preflights = ([self.preflighter.assess(f, today) for f in inv]
                       if include_preflight else [])
         return build_report(inv, plan, preflights, self._report_provenance(asset_ids),
                             audit_verified=self.audit_ok(),
-                            connections=self._connections(asset_ids))
+                            connections=self._connections(asset_ids),
+                            exempt=exempt)
+
+    def _scan_exempt(self, asset_ids: list[str]) -> dict[str, str]:
+        """Asset ids (from the requested set) flagged scan-exempt in the trusted
+        registry, mapped to the operator's reason. A scan-exempt ssh-host is one
+        intentionally not SSH-reachable, so a scan failure on it is expected, not
+        a fault."""
+        wanted = set(asset_ids)
+        out: dict[str, str] = {}
+        for a in self.registry.all():
+            attrs = getattr(a, "attributes", None) or {}
+            if a.asset_id in wanted and attrs.get("scan_exempt"):
+                out[a.asset_id] = (attrs.get("scan_exempt_reason")
+                                   or "SSH not available (configured scan-exempt)")
+        return out
 
     def _connections(self, asset_ids: list[str]) -> dict[str, dict]:
         """Address (host/port) per asset, resolved from the trusted registry so

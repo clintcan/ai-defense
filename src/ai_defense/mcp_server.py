@@ -217,7 +217,8 @@ def tool_names() -> list[str]:
 def _asset_json(a: Asset) -> dict:
     return {"asset_id": a.asset_id, "kind": a.kind, "owner": a.owner,
             "environment": a.environment,
-            "host": a.connection.host if a.connection else None}
+            "host": a.connection.host if a.connection else None,
+            "scan_exempt": bool((a.attributes or {}).get("scan_exempt"))}
 
 
 def _findings_json(f: HostFindings) -> dict:
@@ -282,6 +283,7 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                     "by_severity": report.counts_by_severity(),
                     "eol_assets": [a.asset_id for a in report.eol_assets],
                     "failed_assets": [a.asset_id for a in report.failed_assets],
+                    "exempt_assets": [a.asset_id for a in report.exempt_assets],
                 },
             }
 

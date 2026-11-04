@@ -69,10 +69,19 @@ class ReportAsset:
     upgrade_path: list[str] = field(default_factory=list)
     findings: list[ReportFinding] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)   # scan problems (e.g. "scan failed: ...")
+    scan_exempt: bool = False              # intentionally not SSH-scanned (by configuration)
+    exempt_reason: str | None = None       # why it is exempt (operator note)
 
     @property
     def scanned(self) -> bool:
-        return not any(i.startswith("scan failed") for i in self.issues)
+        """Genuinely scanned this run — neither exempt nor a scan failure."""
+        return not self.scan_exempt and not any(i.startswith("scan failed") for i in self.issues)
+
+    @property
+    def failed(self) -> bool:
+        """A *real* scan failure (unreachable/auth/host-key), not a deliberate
+        exemption — so an off-limits host is never counted as a failure."""
+        return not self.scan_exempt and any(i.startswith("scan failed") for i in self.issues)
 
 
 @dataclass(frozen=True)
@@ -122,4 +131,8 @@ class Report:
 
     @property
     def failed_assets(self) -> list[ReportAsset]:
-        return [a for a in self.assets if not a.scanned]
+        return [a for a in self.assets if a.failed]
+
+    @property
+    def exempt_assets(self) -> list[ReportAsset]:
+        return [a for a in self.assets if a.scan_exempt]

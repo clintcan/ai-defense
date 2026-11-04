@@ -6,6 +6,7 @@ Subcommands:
   report        Scan asset(s) and write vulnerability reports to local files.
   bulk-onboard  Register discovered cloud instances as ssh-host assets (operator).
   update-asset  Correct an ssh-host's connection info (operator; preserves attestation).
+  scan-exempt   Mark an ssh-host as intentionally not SSH-scanned (or clear it).
   pending       List approval change-sets in a DB.
   approve       Approve a pending change-set.
 """
@@ -92,6 +93,10 @@ def _run_report(args) -> int:
         print("  by severity: " + ", ".join(f"{k} {v}" for k, v in by_sev.items()))
     if report.eol_assets:
         print("  EOL/ESM:     " + ", ".join(a.asset_id for a in report.eol_assets))
+    if report.failed_assets:
+        print("  failed:      " + ", ".join(a.asset_id for a in report.failed_assets))
+    if report.exempt_assets:
+        print("  exempt:      " + ", ".join(a.asset_id for a in report.exempt_assets))
     print("\nWritten:")
     for name, path in paths.items():
         print(f"  {name:18} {path}")
@@ -185,6 +190,27 @@ def _run_update_asset(args) -> int:
     return 0
 
 
+def _run_scan_exempt(args) -> int:
+    from .db import init_db
+    from .db.repositories import AssetRepository
+
+    repo = AssetRepository(init_db(args.db))
+    try:
+        asset = repo.set_scan_exempt(args.asset_id, exempt=not args.clear, reason=args.reason)
+    except KeyError as exc:
+        print(f"error: {exc}")
+        return 1
+    attrs = asset.attributes or {}
+    if attrs.get("scan_exempt"):
+        reason = attrs.get("scan_exempt_reason")
+        print(f"{asset.asset_id} marked scan-exempt"
+              + (f" — {reason}" if reason else "")
+              + " (skipped by scans/reports; listed as exempt, not failed)")
+    else:
+        print(f"{asset.asset_id} scan-exemption cleared (will be scanned normally)")
+    return 0
+
+
 def _run_pending(db: str) -> int:
     from .db import init_db
     from .db.repositories import ApprovalRepository
@@ -270,6 +296,15 @@ def main(argv: list[str] | None = None) -> int:
     p_update.add_argument("--key-ref", default=None,
                           help="new vault key reference (key already stored in the vault)")
 
+    p_exempt = sub.add_parser(
+        "scan-exempt",
+        help="mark an ssh-host as intentionally not SSH-scanned (or clear with --clear)")
+    p_exempt.add_argument("--db", required=True, help="DB URL the asset is registered in")
+    p_exempt.add_argument("--asset-id", required=True)
+    p_exempt.add_argument("--reason", default=None,
+                          help="why it's off-limits to SSH (shown in reports)")
+    p_exempt.add_argument("--clear", action="store_true", help="remove the exemption")
+
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)
 
@@ -290,6 +325,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_bulk_onboard(args)
     if args.command == "update-asset":
         return _run_update_asset(args)
+    if args.command == "scan-exempt":
+        return _run_scan_exempt(args)
     if args.command == "pending":
         return _run_pending(args.db)
     if args.command == "approve":

@@ -327,6 +327,19 @@ rate-limited mid-sweep, the fetch is **incomplete** — so every artifact carrie
 `scan-degraded` (import it with auto-close disabled). A degraded or partial scan
 is never presented as a clean bill of health.
 
+If a host is **intentionally** not SSH-reachable (off-limits by design), mark it
+exempt so it is skipped and reported as *exempt* rather than counted as a
+failure:
+
+```bat
+ai-defense scan-exempt --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" --asset-id web-01 --reason "no SSH by design"
+```
+
+Clear it with `--clear`. The flag is a non-secret registry attribute (connection
+and authorization untouched); exempt hosts are skipped by `report` / `report
+--all` and listed under their own "exempt" line, distinct from real scan
+failures.
+
 ## Bulk onboarding (fill the fleet from cloud discovery)
 
 `report --all` only covers hosts that are **registered**. To turn your

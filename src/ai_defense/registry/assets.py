@@ -71,6 +71,25 @@ class AssetRegistry:
         self._assets[asset_id] = updated
         return updated
 
+    def set_scan_exempt(self, asset_id: str, exempt: bool,
+                        reason: str | None = None) -> Asset:
+        """Mark/clear an ssh-host as intentionally not SSH-scanned (stored in
+        ``attributes``); authorization and connection are untouched."""
+        asset = self._assets.get(asset_id)
+        if asset is None:
+            raise KeyError(f"asset not registered: {asset_id}")
+        attrs = dict(asset.attributes or {})
+        if exempt:
+            attrs["scan_exempt"] = True
+            if reason:
+                attrs["scan_exempt_reason"] = reason
+        else:
+            attrs.pop("scan_exempt", None)
+            attrs.pop("scan_exempt_reason", None)
+        updated = replace(asset, attributes=attrs)
+        self._assets[asset_id] = updated
+        return updated
+
     def get(self, asset_id: str) -> Asset | None:
         return self._assets.get(asset_id)
 

@@ -10,10 +10,11 @@ Schema (``schema_version`` 1.0) — self-describing and stable; see CLAUDE.md
       "provenance": { scope, advisory_source, kev_enabled, scan_mode,
                       audit_verified, feed_degraded, feed_note },
       "summary": { assets, findings, by_kind{}, by_severity{}, kev,
-                   eol_assets },
+                   eol_assets, failed_assets, exempt_assets },
       "assets": [
         { "asset_id", "host", "port", "os", "ecosystem", "support_status",
           "upgrade": { "verdict", "target", "path" },
+          "scanned", "scan_exempt", "exempt_reason", "issues",
           "findings": [
             { "cve_id", "package", "kind", "severity", "cvss", "kev",
               "installed_version", "fixed_version", "priority",
@@ -65,6 +66,7 @@ def to_generic(report: Report) -> dict:
             "kev": len(report.kev_findings),
             "eol_assets": [a.asset_id for a in report.eol_assets],
             "failed_assets": [a.asset_id for a in report.failed_assets],
+            "exempt_assets": [a.asset_id for a in report.exempt_assets],
         },
         "assets": [
             {
@@ -74,6 +76,8 @@ def to_generic(report: Report) -> dict:
                 "upgrade": {"verdict": a.upgrade_verdict,
                             "target": a.upgrade_target, "path": a.upgrade_path},
                 "scanned": a.scanned,
+                "scan_exempt": a.scan_exempt,
+                "exempt_reason": a.exempt_reason,
                 "issues": a.issues,
                 "findings": [_finding(f) for f in a.findings],
             }

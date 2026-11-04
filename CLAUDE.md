@@ -345,8 +345,9 @@ emits four deliverables:
   { tool, schema_version, generated_at,
     provenance: { scope[], advisory_source, kev_enabled, scan_mode,
                   audit_verified, feed_degraded, feed_note },
-    summary:    { assets, findings, by_kind{}, by_severity{}, kev, eol_assets[] },
-    assets: [ { asset_id, os, ecosystem, support_status,
+    summary:    { assets, findings, by_kind{}, by_severity{}, kev, eol_assets[],
+                  failed_assets[], exempt_assets[] },
+    assets: [ { asset_id, os, ecosystem, support_status, scanned, scan_exempt,
                 upgrade: { verdict, target, path[] },
                 findings: [ { cve_id, package, kind, severity, cvss, kev,
                               installed_version, fixed_version, priority,
@@ -369,6 +370,13 @@ emits four deliverables:
   `scan-degraded`** — a degraded import must be run with auto-close **disabled**,
   because the findings the partial scan missed are exactly the ones DefectDojo
   would otherwise close as "fixed".
+- **Scan-exempt assets.** An ssh-host that is intentionally not SSH-reachable can
+  be flagged `scan_exempt` in its registry `attributes` (operator action: the
+  `scan-exempt` CLI, stored as a non-secret attribute; connection and
+  authorization untouched). The engine then **does not scan it**, and the report
+  lists it as *exempt* — separate from, and never counted among, hosts that
+  genuinely failed to scan. This keeps a report honest without the recurring
+  "could not be scanned" noise for a host that is off-limits by design.
 
 ---
 

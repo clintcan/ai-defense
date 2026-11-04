@@ -62,7 +62,8 @@ def executive_summary_md(report: Report) -> str:
     out.append(f"_{_provenance_line(report)}_")
     out.append("")
     failed = report.failed_assets
-    scanned_n = len(report.assets) - len(failed)
+    exempt = report.exempt_assets
+    scanned_n = sum(1 for a in report.assets if a.scanned)
     out.append(f"**{scanned_n}** of **{len(report.assets)}** asset(s) scanned · "
                f"**{len(report.all_findings)}** open finding(s).")
     if failed:
@@ -70,6 +71,12 @@ def executive_summary_md(report: Report) -> str:
         out.append(f"> ⚠ **{len(failed)} host(s) could not be scanned** (not counted above): "
                    + ", ".join(f"{a.asset_id}" + (f" ({a.host})" if a.host else "")
                                for a in failed) + ".")
+    if exempt:
+        out.append("")
+        out.append(f"> ℹ **{len(exempt)} host(s) not SSH-scanned — exempt by configuration** "
+                   "(intentionally off-limits, not a failure): "
+                   + ", ".join(f"{a.asset_id}" + (f" ({a.host})" if a.host else "")
+                               for a in exempt) + ".")
     out.extend(_degraded_banner(report))
     out.append("")
 
@@ -167,6 +174,11 @@ def _asset_section(a: ReportAsset) -> list[str]:
     if meta:
         out.append(" · ".join(meta))
         out.append("")
+    if a.scan_exempt:
+        reason = f" — {a.exempt_reason}" if a.exempt_reason else ""
+        out.append(f"_Not SSH-scanned: exempt by configuration{reason}._")
+        out.append("")
+        return out
     if a.upgrade_verdict:
         line = f"**Upgrade preflight:** {a.upgrade_verdict}"
         if a.upgrade_target:

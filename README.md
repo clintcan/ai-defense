@@ -144,6 +144,11 @@ Working vertical slice. Implemented and tested end to end:
   authorization** (the DB update appends no new attestation). The tool targets
   the asset itself, so only an already-authorized asset can be updated.
 
+- **Client-agnostic MCP** — the stdio server isn't Claude-specific. Besides
+  Claude Desktop/Code it's **verified with [opencode](https://opencode.ai)**, and
+  any MCP host that can launch a local stdio server (Cursor, Cline, Zed, VS Code,
+  Goose, …) connects with the same command. See `docs/connect-claude.md` §2c.
+
 Still stubbed: other cloud providers (GCP/Azure) — the seams are in place. Run
 `pytest` and `ruff check src tests`.
 

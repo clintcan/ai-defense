@@ -121,17 +121,17 @@ claude mcp remove ai-defense    # remove it
 To change the command (e.g. switch to real SSH mode), `remove` then `add` again.
 Then `claude` — the tools are available in the session.
 
-## 2c. Other MCP clients (Cursor, Cline, Zed, VS Code, Goose, …)
+## 2c. Other MCP clients (opencode, Cursor, Cline, Zed, VS Code, …)
 
 MCP is an open protocol and this is a standard **stdio** server, so any host that
 can launch a local stdio MCP server can drive it — the planner/enforcer boundary
 and every safeguard are identical regardless of client. Clients that work this
-way include **Cursor**, **Windsurf**, **Zed**, **VS Code** (Copilot agent mode),
-the **Cline** and **Continue** extensions, **Goose**, **LibreChat**, desktop
-clients like **Cherry Studio** / **5ire** / **Witsy**, and anything built on the
-MCP or OpenAI Agents SDKs. Check each client's own MCP docs for where its config
-lives; the block is almost always the same `mcpServers` shape as Claude Desktop
-(§2a):
+way include **opencode** (terminal agent — **verified with AI Defense**, see
+below), **Cursor**, **Windsurf**, **Zed**, **VS Code** (Copilot agent mode), the
+**Cline** and **Continue** extensions, **Goose**, **LibreChat**, desktop clients
+like **Cherry Studio** / **5ire** / **Witsy**, and anything built on the MCP or
+OpenAI Agents SDKs. Check each client's own MCP docs for where its config lives;
+the block is almost always the same `mcpServers` shape as Claude Desktop (§2a):
 
 ```json
 {
@@ -146,8 +146,31 @@ lives; the block is almost always the same `mcpServers` shape as Claude Desktop
 ```
 
 Add the same real-SSH / `--osv` / `--aws-region` args to `args` exactly as in
-§2a/§2b. On macOS/Linux the command is `…/.venv/bin/ai-defense` (no `.exe`). Two
-caveats:
+§2a/§2b. On macOS/Linux the command is `…/.venv/bin/ai-defense` (no `.exe`).
+
+**opencode** (verified working) is the one exception to the `mcpServers` shape —
+it uses its own `opencode.jsonc`, with the server under an `mcp` key and the
+command as an **array** (append `--ssh-keys` / `--allow-unknown-hosts` / `--osv`
+/ `--kev` / `--aws-region` to the array for real-SSH/cloud mode):
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ai-defense": {
+      "type": "local",
+      "command": ["C:\\path\\to\\ai_defense\\.venv\\Scripts\\ai-defense.exe",
+                  "mcp", "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Put it in `./opencode.jsonc` (project-local) or `~/.config/opencode/opencode.jsonc`
+(global). `opencode mcp list` prints the status (`✓ ai-defense connected`)
+**without spending tokens** — a quick way to confirm the wiring before chatting.
+Two caveats:
 
 - **Local stdio only.** The host launches the server as a child process on the
   same machine; there is no network endpoint. A remote/hosted client (e.g.

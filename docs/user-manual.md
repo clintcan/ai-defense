@@ -223,9 +223,10 @@ Then `claude mcp list` should show **ai-defense … ✔ Connected**.
 ### 7c. Using a different AI tool (not Claude)
 
 AI Defense isn't tied to Claude. It speaks a shared standard called **MCP**, so
-other AI assistants that support MCP can use it too — for example the editors
+other AI assistants that support MCP can use it too — including the terminal
+assistant **opencode** (tested with AI Defense and working), the editors
 **Cursor**, **Windsurf**, and **Zed**, **VS Code** (with Copilot's agent mode),
-or extensions like **Cline** and **Continue**. Look in your tool's settings for
+and extensions like **Cline** and **Continue**. Look in your tool's settings for
 an "MCP" or "MCP servers" section.
 
 Most of them use the **same settings block** as Claude Desktop — you paste it

@@ -344,7 +344,10 @@ host.
     codename → new, from the reviewed release table, never planner text) through
     the **same managed backup/diff/validate/restore edit primitive** as 6a
     (`AptSourcesCodenameSwap`, validated by `apt-get update`, restored on
-    failure); `apt-get full-upgrade` (dry-run `--simulate` first); the same
+    failure — the security suite `<old>/updates` becomes `<new>-security` from
+    bullseye on, and `<old>-backports` lines are **commented out**, not swapped,
+    since backports is optional and retired off the main mirror as a release
+    ages); `apt-get full-upgrade` (dry-run `--simulate` first); the same
     reboot step. If the file names neither the old nor the new codename (e.g. a
     symbolic `stable`/`oldstable` sources.list), it **refuses rather than
     guesses** (rule #7) — a human verifies first.

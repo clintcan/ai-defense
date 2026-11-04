@@ -128,10 +128,18 @@ def test_swap_codename_security_suite_across_layouts():
     # bullseye -> bookworm: already "-security", a plain word swap is right
     assert swap_codename(sec.format("bullseye-security"), "bullseye", "bookworm") \
         == sec.format("bookworm-security")
-    # the real db-proxy-1 file: buster-updates/backports are suites, not security
+    # the real db-proxy-1 file: -updates is swapped; -backports is disabled
     real = ("deb http://cdn-aws.deb.debian.org/debian buster-updates main\n"
-            "deb http://cdn-aws.deb.debian.org/debian buster-backports main\n")
-    assert swap_codename(real, "buster", "bullseye") == real.replace("buster", "bullseye")
+            "deb http://cdn-aws.deb.debian.org/debian buster-backports main\n"
+            "deb-src http://cdn-aws.deb.debian.org/debian buster-backports main\n")
+    out = swap_codename(real, "buster", "bullseye")
+    assert out == ("deb http://cdn-aws.deb.debian.org/debian bullseye-updates main\n"
+                   "# deb http://cdn-aws.deb.debian.org/debian bullseye-backports main\n"
+                   "# deb-src http://cdn-aws.deb.debian.org/debian bullseye-backports main\n")
+    assert swap_codename(out, "buster", "bullseye") == out             # idempotent on retry
+    # an already-commented backports line is left alone (no "# # ")
+    done = "# deb http://x/debian buster-backports main\ndeb http://x/debian buster main\n"
+    assert "# # " not in swap_codename(done, "buster", "bullseye")
 
 
 class _EditT:

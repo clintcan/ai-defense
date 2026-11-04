@@ -93,4 +93,9 @@ def swap_codename(content: str, old: str, new: str) -> str:
         return content
     if new not in _LEGACY_SECURITY_SUITE:
         content = re.sub(rf"\b{re.escape(old)}/updates\b", f"{new}-security", content)
+    # Backports is optional and is retired off the main mirror once a release
+    # ages out (bullseye-backports 404s there), which fails apt-get update. Keep
+    # the line, disabled, for a human to re-point (operator decision 2026-11-05).
+    content = re.sub(rf"^([ \t]*)(deb(?:-src)?[ \t].*\b{re.escape(old)}-backports\b.*)$",
+                     r"\1# \2", content, flags=re.MULTILINE)
     return pattern.sub(new, content)

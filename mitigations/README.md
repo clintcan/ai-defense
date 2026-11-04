@@ -49,12 +49,18 @@ mapping with a top-level `mitigations:` list. Fields:
 | `tcp-sack-panic.yaml` | CVE-2019-11477/11478/11479 (SACK Panic): disable TCP SACK | command `harden.disable_tcp_sack` |
 | `mptcp.yaml` | Disable Multipath TCP persistently | config drop-in `config.sysctl_mptcp_off` |
 | `sshd-x11.yaml` | sshd: disable X11 forwarding (no conf.d) | in-place block edit `config.sshd_disable_x11` |
+| `http2-rapid-reset.yaml` | CVE-2023-44487 (HTTP/2 Rapid Reset): cap nginx concurrent streams | config drop-in `config.nginx_http2_rapidreset` |
 
 A `template`/`rollback_template` may name a **command** (a fixed argv in
 `ssh/catalog/`) or a **config action** (a managed drop-in in
-`ssh/catalog/configs.py`, which writes/validates/reloads a file under an
-allowlisted dir and is reversed by deleting it). Either way it must already be
-reviewed in the catalog.
+`ssh/catalog/configs.py`, which writes the file under an allowlisted dir, runs an
+optional validator such as `nginx -t`, reloads, and removes the drop-in if either
+step fails; reversed by deleting it). Either way it must already be reviewed in
+the catalog.
+
+To undo an applied mitigation, use the `revert_mitigation` tool (it runs the
+entry's `rollback_template`) — a separate, approval-gated change, not a re-run of
+`mitigate`.
 
 Each is a single-mitigation file; put several in one file as a YAML/JSON list if
 you prefer. All are runtime changes (reversible); persist a sysctl one across

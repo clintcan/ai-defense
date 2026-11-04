@@ -61,13 +61,22 @@ class ConfigExecutor:
         if out.exit_code != 0:
             return ExecOutcome(applied=False, resolved_command=cmd, result=out,
                                blocked_reason=f"write failed (exit {out.exit_code})")
-        if a.reload:
-            rout, rreason = self._ex.run_one(host, list(a.reload), key=key, user=user, port=port)
-            if rout is None or rout.exit_code != 0:
-                self._ex.run_one(host, ["sudo", "-n", "rm", "-f", a.path],
-                                 key=key, user=user, port=port)   # rollback
-                detail = rreason or f"reload/validate failed (exit {rout.exit_code})"
-                return ExecOutcome(applied=False, resolved_command=cmd, result=rout,
+
+        def _rollback():
+            self._ex.run_one(host, ["sudo", "-n", "rm", "-f", a.path],
+                             key=key, user=user, port=port)
+
+        # validate first (e.g. `nginx -t`), then reload — rolling the file back
+        # (deleting it) if either step fails, so a bad drop-in never stays.
+        for step, argv in (("validate", a.validate), ("reload/validate", a.reload)):
+            if not argv:
+                continue
+            sout, sreason = self._ex.run_one(host, list(argv), key=key, user=user, port=port)
+            if sout is None or sout.exit_code != 0:
+                _rollback()
+                code = "n/a" if sout is None else sout.exit_code
+                detail = sreason or f"{step} failed (exit {code})"
+                return ExecOutcome(applied=False, resolved_command=cmd, result=sout,
                                    blocked_reason=f"{detail}; drop-in removed")
         return ExecOutcome(applied=True, resolved_command=cmd, result=out)
 

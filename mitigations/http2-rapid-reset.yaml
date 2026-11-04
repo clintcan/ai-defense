@@ -1,0 +1,22 @@
+# HTTP/2 Rapid Reset (CVE-2023-44487) — the 2023 HTTP/2 stream-reset DoS. The
+# real fix is the vendor's patched web server; where that can't be installed yet,
+# this bounds nginx's concurrent streams per connection so a reset-flood can't
+# amplify. Done as a conf.d drop-in (included in nginx's http{} block), validated
+# by `nginx -t` before reload — if the running nginx dropped the directive, the
+# validation fails and the drop-in is removed cleanly rather than left behind.
+# Run it with:  mitigate <host> CVE-2023-44487   (reverse: revert_mitigation ...)
+#
+# Both actions are allowlisted config actions in the reviewed catalog
+# (ssh/catalog/configs.py); a file may reference one but can't define a new one.
+# nginx-only: on a host without nginx the `tee` write fails and nothing is applied.
+- id: http2-rapid-reset-nginx
+  cves: [CVE-2023-44487]
+  title: Bound nginx HTTP/2 concurrent streams (Rapid Reset mitigation)
+  source_ref: https://www.cve.org/CVERecord?id=CVE-2023-44487
+  template: config.nginx_http2_rapidreset
+  rollback_template: config.nginx_http2_rapidreset.remove
+  temporary: true
+  description: >-
+    write http2_max_concurrent_streams 128 to /etc/nginx/conf.d/99-ai-defense-http2.conf,
+    validate with `nginx -t`, then reload nginx; reverse removes the drop-in and
+    reloads. Temporary: track and install the vendor-patched nginx as the real fix.

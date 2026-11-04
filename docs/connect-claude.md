@@ -3,10 +3,10 @@
 The MCP server exposes a focused set of tools Claude can call in plain language:
 `list_assets`, `scan`, `plan`, `upgrade_preflight` (read-only OS-upgrade
 eligibility), `report` (write Markdown + DefectDojo/generic JSON to local files),
-`remediate`, `mitigate` (apply a cited, reversible workaround), `list_mitigations`
-(read-only: what `mitigate` can apply), `update_asset` (correct a host's
-connection without re-onboarding), `approve_change`, `audit_tail`, plus the cloud
-tools (below). Every call still goes through the dispatcher, so policy,
+`remediate`, `mitigate` (apply a cited, reversible workaround), `revert_mitigation`
+(undo one by running its recorded rollback), `list_mitigations` (read-only: what
+`mitigate` can apply), `update_asset` (correct a host's connection without
+re-onboarding), `approve_change`, `audit_tail`, plus the cloud tools (below). Every call still goes through the dispatcher, so policy,
 authorization, the approval gate, rate limits, redaction, and the audit log all
 apply.
 
@@ -250,6 +250,13 @@ Claude to *"mitigate CVE-2021-4034 on `<host>`"* — the `mitigate` tool applies
 cited, **reversible** workaround (for PwnKit, stripping the setuid bit from
 `pkexec`), approval-gated and dry-run first, and records a rollback. Only CVEs
 with a catalogued mitigation are eligible; anything else escalates to a human.
+
+To back one out — once the vendor patch is in, or to undo a workaround — ask
+Claude to *"revert the mitigation for `<CVE>` on `<host>`"*. `revert_mitigation`
+runs the mitigation's **recorded rollback action** (restore the setuid bit,
+remove the sysctl/nginx drop-in, delete the managed sshd block). It is its own
+MUTATING, approval-gated change — approving the apply does not also authorize the
+revert.
 
 The catalogue is the built-ins **plus any files in a mitigations folder** you
 point to with `--mitigations-dir` (yaml/json, one or many mitigations per file).

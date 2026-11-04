@@ -93,6 +93,7 @@ def test_shipped_mitigations_folder_is_valid():
     assert warns == [], warns                              # every shipped file must load
     assert reg.for_cve("CVE-2021-4034") is not None       # pwnkit
     assert reg.for_cve("CVE-2019-11477") is not None       # SACK Panic (multi-CVE)
+    assert reg.for_cve("CVE-2023-44487").mitigation_id == "http2-rapid-reset-nginx"
     assert reg.for_cve("CVE-2019-11479") is not None
     assert reg.for_cve("MPTCP") is not None                # mptcp hardening
 

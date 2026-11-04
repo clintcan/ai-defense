@@ -22,6 +22,7 @@ ALLOWED_DROPIN_DIRS: tuple[str, ...] = (
     "/etc/modprobe.d/",
     "/etc/ssh/sshd_config.d/",
     "/etc/security/limits.d/",
+    "/etc/nginx/conf.d/",       # included inside nginx's http{} block
 )
 
 
@@ -40,7 +41,8 @@ class DropInWrite:
     name: str
     path: str                        # fixed; must be under an ALLOWED_DROPIN_DIR
     content: str
-    reload: tuple[str, ...] = ()      # argv run after the write (also validates); () = none
+    validate: tuple[str, ...] = ()    # argv run after the write (rollback on failure); () = none
+    reload: tuple[str, ...] = ()      # argv run after validation passes; () = none
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ class ConfigBlockRemove:
 
 _MPTCP_PATH = "/etc/sysctl.d/80-ai-defense-mptcp.conf"
 _SSHD = "/etc/ssh/sshd_config"
+_NGINX_HTTP2_PATH = "/etc/nginx/conf.d/99-ai-defense-http2.conf"
 
 # Allowlisted config actions, keyed by name. A mitigation's template /
 # rollback_template may reference one of these (apply / reverse).
@@ -113,6 +116,24 @@ CONFIG_ACTIONS: dict[str, DropInWrite | DropInRemove] = {
         name="config.sshd_disable_x11.remove", path=_SSHD, marker="sshd-x11",
         validate=("sudo", "-n", "sshd", "-t"),
         reload=("sudo", "-n", "systemctl", "reload", "sshd"),
+    ),
+    # HTTP/2 Rapid Reset (CVE-2023-44487): cap concurrent streams per connection
+    # so a reset-flood can't amplify. A conf.d drop-in is included in nginx's
+    # http{} block. Validated by `nginx -t` (which rejects the directive on nginx
+    # builds that dropped it, so a mismatch rolls back cleanly rather than lingering).
+    "config.nginx_http2_rapidreset": DropInWrite(
+        name="config.nginx_http2_rapidreset",
+        path=_NGINX_HTTP2_PATH,
+        content="# AI Defense: HTTP/2 Rapid Reset mitigation (CVE-2023-44487)\n"
+                "# Bound concurrent streams; the vendor patch is the real fix.\n"
+                "http2_max_concurrent_streams 128;\n",
+        validate=("sudo", "-n", "nginx", "-t"),
+        reload=("sudo", "-n", "systemctl", "reload", "nginx"),
+    ),
+    "config.nginx_http2_rapidreset.remove": DropInRemove(
+        name="config.nginx_http2_rapidreset.remove",
+        path=_NGINX_HTTP2_PATH,
+        reload=("sudo", "-n", "systemctl", "reload", "nginx"),
     ),
 }
 

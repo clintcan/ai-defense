@@ -297,17 +297,33 @@ class Engine:
         mitigations folder) are offered — an uncatalogued CVE escalates to a
         human, never an invented fix (rule #6). Returns a pending change_set_id
         until approved; re-call to apply."""
+        return self._mitigation_dispatch(asset_id, cve_id, reverse=False)
+
+    def revert_mitigation(self, asset_id: str, cve_id: str) -> ToolResult:
+        """Undo a previously applied mitigation by running its recorded rollback
+        action (restore the setuid bit, remove the sysctl/nginx drop-in, delete the
+        managed sshd block, …). Same enforcement as applying it — MUTATING,
+        approval-gated (MITIGATE_CANARY), audited — because reversing a hardening
+        step is itself a state-changing remote action. Returns a pending
+        change_set_id until approved; re-call to apply."""
+        return self._mitigation_dispatch(asset_id, cve_id, reverse=True)
+
+    def _mitigation_dispatch(self, asset_id: str, cve_id: str, *, reverse: bool) -> ToolResult:
         m = self.mitigations.for_cve(cve_id)
         if m is None:
             return ToolResult(
                 ok=False, tool="mitigation.apply_hardening",
                 summary=f"no catalogued mitigation for {cve_id} — escalate for a human "
                         f"decision (an OS upgrade may be the real fix)")
+        verb = "revert" if reverse else "mitigate"
+        params = {"asset_id": asset_id, "mitigation_id": m.mitigation_id}
+        if reverse:
+            params["reverse"] = True
         return self.dispatcher.dispatch(Intent(
             tool="mitigation.apply_hardening",
-            params={"asset_id": asset_id, "mitigation_id": m.mitigation_id},
+            params=params,
             targets=[asset_id], action_class=ActionClass.MITIGATE_CANARY,
-            reason=f"mitigate {cve_id} on {asset_id}: {m.title}", source_ref=m.source_ref))
+            reason=f"{verb} {cve_id} on {asset_id}: {m.title}", source_ref=m.source_ref))
 
     # -- approval / audit -------------------------------------------------
     def approve(self, change_set_id: str, approver: str = "operator") -> ApprovalState:

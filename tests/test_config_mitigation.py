@@ -194,3 +194,56 @@ def test_engine_mitigate_applies_inplace_edit():
     eng.approve(p.data["change_set_id"])
     out = handle_call(eng, "mitigate", {"asset_id": "h2", "cve": "SSHD-X11-FORWARDING"})
     assert out["ok"] is True and out["data"].get("diff")
+
+
+# --- drop-in: validate (nginx -t) before reload -------------------------
+
+def test_dropin_validates_before_reload_and_rolls_back_on_validate_failure():
+    # nginx HTTP/2 Rapid Reset drop-in: `nginx -t` runs before the reload, and a
+    # validation failure deletes the drop-in (clean rollback) so nothing lingers.
+    tp = _T(fail_on="nginx -t")
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        CONFIG_ACTIONS["config.nginx_http2_rapidreset"], host="h", key="k")
+    assert not out.applied and "removed" in out.blocked_reason
+    argvs = _argvs(tp)
+    assert any(a[:4] == ("sudo", "-n", "nginx", "-t") for a in argvs)       # validated
+    assert not any("systemctl" in " ".join(a) for a in argvs)              # never reloaded
+    assert any(a[:4] == ("sudo", "-n", "rm", "-f") for a in argvs)          # rolled back
+
+
+def test_dropin_validate_then_reload_on_success():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        CONFIG_ACTIONS["config.nginx_http2_rapidreset"], host="h", key="k", user="ubuntu")
+    assert out.applied
+    tee = next(c for c in tp.calls if c[0][:3] == ("sudo", "-n", "tee"))
+    assert "http2_max_concurrent_streams 128" in tee[1]
+    argvs = _argvs(tp)
+    assert any(a[:4] == ("sudo", "-n", "nginx", "-t") for a in argvs)       # validated, then
+    assert any(a[:5] == ("sudo", "-n", "systemctl", "reload", "nginx") for a in argvs)
+    assert not any(a[:4] == ("sudo", "-n", "rm", "-f") for a in argvs)      # no rollback
+
+
+# --- revert_mitigation: run the recorded rollback action ----------------
+
+def test_engine_revert_mitigation_reverses_a_config_dropin():
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    eng.registry.register(_host("hr"))
+    pending = eng.revert_mitigation("hr", "MPTCP")
+    assert not pending.ok and pending.data["approval_state"] == "pending"
+    eng.approve(pending.data["change_set_id"])
+    done = handle_call(eng, "revert_mitigation", {"asset_id": "hr", "cve": "MPTCP"})
+    assert done["ok"] is True
+    assert done["data"]["reverse"] is True
+    # the reverse ran the .remove action (a delete) and its undo is to re-apply
+    assert done["data"]["rollback"]["payload"]["rollback_template"] == "config.sysctl_mptcp_off"
+
+
+def test_revert_is_a_distinct_approval_from_apply():
+    # reverse=True changes the change-set id, so reverting needs its own approval —
+    # approving the apply does not silently also authorize the revert.
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    eng.registry.register(_host("hd"))
+    apply_cs = eng.mitigate("hd", "MPTCP").data["change_set_id"]
+    revert_cs = eng.revert_mitigation("hd", "MPTCP").data["change_set_id"]
+    assert apply_cs != revert_cs

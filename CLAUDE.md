@@ -236,9 +236,14 @@ record — and internal error text is never surfaced to the planner.
   dropped file can map a CVE to an existing action but can never introduce a new
   command (rules #3/#5). Applying one is the approval-gated **`mitigate`** tool: it
   dry-runs / validates first and records a rollback (CVE-2021-4034/PwnKit strips
-  the setuid bit from `/usr/bin/pkexec`; the MPTCP sample writes a sysctl drop-in).
-  Use it where the vendor patch can't be installed (an EOL OS without ESM); an
-  uncatalogued CVE escalates to a human instead.
+  the setuid bit from `/usr/bin/pkexec`; the MPTCP sample writes a sysctl drop-in;
+  the HTTP/2 Rapid Reset sample, CVE-2023-44487, writes an nginx `conf.d` drop-in
+  that `nginx -t` validates before reload). Use it where the vendor patch can't be
+  installed (an EOL OS without ESM); an uncatalogued CVE escalates to a human
+  instead. Backing a mitigation out — once the vendor patch lands, or to undo a
+  workaround — is the separate approval-gated **`revert_mitigation`** tool, which
+  runs the mitigation's *recorded rollback action*; it is its own MUTATING change,
+  so approving the apply never silently also authorizes the revert.
 - **Remediation is not only package installs.** Mitigation and hardening
   frequently means *changing system configuration*. Supported remediation action
   types:

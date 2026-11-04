@@ -166,6 +166,7 @@ def make_mitigation_tool(
     def _execute(params: dict, *, resolve_secret) -> ToolResult:
         asset_id = params["asset_id"]
         mitigation_id = params["mitigation_id"]
+        reverse = bool(params.get("reverse"))
         mc = catalogue.get(mitigation_id)
         if mc is None:
             return ToolResult(
@@ -173,31 +174,37 @@ def make_mitigation_tool(
                 summary=f"unknown mitigation (not allowlisted): {mitigation_id}",
                 data={"mitigation_id": mitigation_id})
 
+        # reverse runs the recorded rollback action; its own undo is to re-apply.
+        action_name = mc.rollback_template if reverse else mc.template
+        undo_name = mc.template if reverse else mc.rollback_template
+        verb = "reverted" if reverse else "applied"
+
         conn = connection_resolver(asset_id)       # host/user/port/key_ref from registry
         key = resolve_secret(conn.key_ref)          # key value from the vault
 
-        is_config = mc.template in configs
+        is_config = action_name in configs
         if is_config:
             if config_executor is None:
                 return ToolResult(ok=False, tool=MITIGATION_TOOL,
                                   summary="config mitigations are not wired in this engine")
-            outcome = config_executor.apply(configs[mc.template], host=conn.host, key=key,
+            outcome = config_executor.apply(configs[action_name], host=conn.host, key=key,
                                              user=conn.user, port=conn.port)
         else:
             outcome = executor.run_template(
-                conn.host, mc.template, {}, key=key,
+                conn.host, action_name, {}, key=key,
                 user=conn.user, port=conn.port, dry_run_first=True,
             )
         rollback = RollbackAction(
             kind=PrimitiveKind.CONFIG_EDIT if is_config else PrimitiveKind.FILE_PERM,
-            description=f"revert mitigation on {asset_id}: {mc.description}",
-            payload={"asset_id": asset_id, "rollback_template": mc.rollback_template},
+            description=(f"re-apply mitigation on {asset_id}: {mc.description}" if reverse
+                        else f"revert mitigation on {asset_id}: {mc.description}"),
+            payload={"asset_id": asset_id, "rollback_template": undo_name},
         )
 
         if not outcome.applied:
             return ToolResult(
                 ok=False, tool=MITIGATION_TOOL,
-                summary=f"not applied: {outcome.blocked_reason}",
+                summary=f"not {verb}: {outcome.blocked_reason}",
                 data={"blocked_reason": outcome.blocked_reason,
                       "dry_run_exit": outcome.dry_run.exit_code if outcome.dry_run else None,
                       "diff": outcome.diff},
@@ -207,10 +214,11 @@ def make_mitigation_tool(
         ok = res is not None and res.exit_code == 0
         return ToolResult(
             ok=ok, tool=MITIGATION_TOOL,
-            summary=(f"mitigation '{mitigation_id}' applied on {asset_id}" if ok
-                     else f"mitigation '{mitigation_id}' failed on {asset_id}"),
+            summary=(f"mitigation '{mitigation_id}' {verb} on {asset_id}" if ok
+                     else f"mitigation '{mitigation_id}' {verb[:-2] if reverse else 'apply'}"
+                          f" failed on {asset_id}"),
             data={
-                "asset_id": asset_id, "mitigation_id": mitigation_id,
+                "asset_id": asset_id, "mitigation_id": mitigation_id, "reverse": reverse,
                 "exit_code": res.exit_code if res else None,
                 "stdout": res.stdout if res else "",
                 "stderr": res.stderr if res else "",
@@ -229,6 +237,7 @@ def make_mitigation_tool(
             "properties": {
                 "asset_id": {"type": "string"},
                 "mitigation_id": {"type": "string"},
+                "reverse": {"type": "boolean"},   # run the recorded rollback action
             },
         },
         executor=_execute,

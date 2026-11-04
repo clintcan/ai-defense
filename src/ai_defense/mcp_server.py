@@ -162,6 +162,23 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "revert_mitigation",
+        "description": "Undo a previously applied mitigation by running its recorded "
+                       "rollback action (restore the pkexec setuid bit, remove the "
+                       "sysctl/nginx drop-in, delete the managed sshd block, …). Use once "
+                       "the vendor patch is in place, or to back out a mitigation. Same "
+                       "enforcement as applying it — MUTATING, approval-gated: returns a "
+                       "pending change_set_id until a human approves, then call again to apply.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["asset_id", "cve"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "cve": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "update_asset",
         "description": "Correct an already-registered ssh-host's connection info "
                        "(host/port/user/key_ref) without re-onboarding — e.g. a rotated "
@@ -349,6 +366,14 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                 out["next"] = "ask the operator to approve, then call mitigate again"
             return out
 
+        if name == "revert_mitigation":
+            res = engine.revert_mitigation(args["asset_id"], args["cve"])
+            out = _tool_result_json(res)
+            if res.data.get("approval_state") == "pending":
+                out["change_set_id"] = res.data.get("change_set_id")
+                out["next"] = "ask the operator to approve, then call revert_mitigation again"
+            return out
+
         if name == "update_asset":
             res = engine.update_asset_connection(
                 args["asset_id"], host=args.get("host"), port=args.get("port"),
@@ -512,6 +537,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def mitigate(asset_id: str, cve: str) -> dict:
         return handle_call(engine, "mitigate", {"asset_id": asset_id, "cve": cve})
 
+    def revert_mitigation(asset_id: str, cve: str) -> dict:
+        return handle_call(engine, "revert_mitigation", {"asset_id": asset_id, "cve": cve})
+
     def update_asset(asset_id: str, host: str | None = None, port: int | None = None,
                      user: str | None = None, key_ref: str | None = None) -> dict:
         return handle_call(engine, "update_asset", {
@@ -534,9 +562,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate, mitigate,
-               list_mitigations, approve_change, audit_tail, onboard_cloud_account,
-               update_asset, cloud_regions, cloud_discover, cloud_patch_state,
-               cloud_remediate):
+               revert_mitigation, list_mitigations, approve_change, audit_tail,
+               onboard_cloud_account, update_asset, cloud_regions, cloud_discover,
+               cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

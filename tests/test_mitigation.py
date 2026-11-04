@@ -66,6 +66,20 @@ def test_mitigation_tool_applies_and_records_rollback():
     assert ("stat", "-c", "%a %n", "/usr/bin/pkexec") in tp.argv   # unprivileged dry-run ran first
 
 
+def test_mitigation_tool_reverse_runs_the_rollback_command():
+    # reverse=True runs the recorded rollback template (restore 4755), not the
+    # apply template, and its own undo points back at the apply.
+    tp = _OkTransport()
+    spec = make_mitigation_tool(SSHExecutor(tp),
+                                lambda aid: ConnectionInfo(host="1.1.1.1", key_ref="k"))
+    res = spec.executor({"asset_id": "h", "mitigation_id": "pwnkit-pkexec-suid",
+                         "reverse": True},
+                        resolve_secret=lambda ref: "KEY")
+    assert res.ok and res.data["reverse"] is True
+    assert res.resolved_command == "sudo -n chmod 4755 /usr/bin/pkexec"   # the restore
+    assert res.data["rollback"]["payload"]["rollback_template"] == "harden.disable_pkexec_suid"
+
+
 def test_mitigation_tool_refuses_unknown_id():
     spec = make_mitigation_tool(SSHExecutor(_OkTransport()),
                                 lambda aid: ConnectionInfo(host="1.1.1.1", key_ref="k"))

@@ -28,6 +28,7 @@ from .configs import (
     dir_allowed,
     edit_path_allowed,
 )
+from .firewall import FIREWALL_ACTIONS, FirewallRule
 from .modules import MODULE_ACTIONS, ModuleBlacklist, ModuleUnblacklist
 from .services import SERVICE_ACTIONS, ServiceStateChange
 
@@ -62,7 +63,8 @@ def _merge_actions(*dicts: dict) -> dict:
 # services + …), keyed by name. A mitigation references one of these; the
 # ConfigExecutor dispatches it by type. CONFIG_ACTIONS stays the config-only view
 # for back-compat.
-PRIMITIVE_ACTIONS: dict = _merge_actions(CONFIG_ACTIONS, MODULE_ACTIONS, SERVICE_ACTIONS)
+PRIMITIVE_ACTIONS: dict = _merge_actions(
+    CONFIG_ACTIONS, MODULE_ACTIONS, SERVICE_ACTIONS, FIREWALL_ACTIONS)
 
 
 def action_primitive_kind(action) -> PrimitiveKind:
@@ -71,6 +73,8 @@ def action_primitive_kind(action) -> PrimitiveKind:
         return PrimitiveKind.KERNEL_MODULE
     if isinstance(action, ServiceStateChange):
         return PrimitiveKind.SERVICE
+    if isinstance(action, FirewallRule):
+        return PrimitiveKind.FIREWALL_RULE
     return PrimitiveKind.CONFIG_EDIT    # DropIn*/ConfigBlock*
 
 
@@ -80,4 +84,5 @@ __all__ = ["CATALOG", "CommandTemplate", "render_argv",
            "ALLOWED_DROPIN_DIRS", "ConfigBlockWrite", "ConfigBlockRemove",
            "edit_path_allowed", "ALLOWED_EDIT_PATHS",
            "MODULE_ACTIONS", "ModuleBlacklist", "ModuleUnblacklist",
-           "SERVICE_ACTIONS", "ServiceStateChange"]
+           "SERVICE_ACTIONS", "ServiceStateChange",
+           "FIREWALL_ACTIONS", "FirewallRule"]

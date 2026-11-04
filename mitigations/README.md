@@ -53,6 +53,7 @@ mapping with a top-level `mitigations:` list. Fields:
 | `php-session-upload-progress.yaml` | Disable PHP `session.upload_progress` (LFI→RCE hardening) | config drop-in `config.php_disable_upload_progress` |
 | `kernel-module-dccp.yaml` | CVE-2017-6074 (DCCP use-after-free LPE): blacklist the `dccp` module | kernel-module `module.blacklist_dccp` |
 | `service-rpcbind.yaml` | CVE-2017-8779 (rpcbomb DoS): disable `rpcbind` where unneeded | service `service.disable_rpcbind` |
+| `firewall-memcached.yaml` | CVE-2018-1000115 (memcached UDP amplification): block UDP 11211 | firewall `firewall.deny_udp_memcached` |
 
 A `template`/`rollback_template` may name any reviewed catalog action:
 
@@ -65,7 +66,10 @@ A `template`/`rollback_template` may name any reviewed catalog action:
   `modprobe -r`);
 - a **service action** (`ssh/catalog/services.py`) — `systemctl disable/mask/enable`,
   denylist-first so a protected unit (auditd, firewalld, ufw, sshd, …) can never be
-  disabled.
+  disabled;
+- a **firewall action** (`ssh/catalog/firewall.py`) — a `ufw` rule edit with a
+  lockout guard (never cut management SSH) and a timed auto-revert that rolls the
+  rule back unless a post-apply health check confirms the host is still reachable.
 
 Either way it must already be reviewed in the catalog — a file can map a CVE to an
 existing action but can never introduce a new one.

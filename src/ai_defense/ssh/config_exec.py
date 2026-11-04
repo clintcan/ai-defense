@@ -28,16 +28,30 @@ from .catalog import (
     dir_allowed,
     edit_path_allowed,
 )
+from .catalog.firewall import FirewallRule
 from .catalog.modules import ModuleBlacklist, ModuleUnblacklist
 from .catalog.services import ServiceStateChange
 from .config_edit import ensure_block, remove_block
 from .executor import ExecOutcome, SSHExecutor
-from .hardening import HARDENING_MODULE_ALLOWLIST, ServiceAction
+from .hardening import (
+    HARDENING_MODULE_ALLOWLIST,
+    FirewallAction,
+    FirewallChange,
+    ServiceAction,
+)
+
+_FW_VERB = {
+    "allow": FirewallAction.ALLOW,
+    "deny": FirewallAction.DENY,
+    "restrict_source": FirewallAction.RESTRICT_SOURCE,
+    "remove_rule": FirewallAction.REMOVE_RULE,
+}
 
 
 class ConfigExecutor:
-    def __init__(self, executor: SSHExecutor) -> None:
+    def __init__(self, executor: SSHExecutor, *, mgmt_sources: tuple[str, ...] = ()) -> None:
         self._ex = executor
+        self._mgmt_sources = tuple(mgmt_sources)   # CIDRs the lockout guard protects
 
     def apply(self, action, *, host: str, key: str,
               user: str = "root", port: int = 22) -> ExecOutcome:
@@ -51,6 +65,8 @@ class ConfigExecutor:
             return self._module(action, host=host, key=key, user=user, port=port)
         if isinstance(action, ServiceStateChange):
             return self._service(action, host=host, key=key, user=user, port=port)
+        if isinstance(action, FirewallRule):
+            return self._firewall(action, host=host, key=key, user=user, port=port)
         return ExecOutcome(applied=False, resolved_command="",
                            blocked_reason=f"unknown config action: {type(action).__name__}")
 
@@ -218,3 +234,75 @@ class ConfigExecutor:
         ok = out.exit_code == 0
         return ExecOutcome(applied=ok, resolved_command=cmd, result=out,
                            blocked_reason=None if ok else f"{cmd} failed (exit {out.exit_code})")
+
+    # -- firewall rules ---------------------------------------------------
+
+    def _firewall(self, a: FirewallRule, *, host, key, user, port) -> ExecOutcome:
+        label = f"ufw {a.action} {a.port}/{a.proto}"
+
+        def _run(argv):
+            return self._ex.run_one(host, argv, key=key, user=user, port=port)
+
+        # Lockout guard: never apply a rule that would cut our own management SSH.
+        change = FirewallChange(action=_FW_VERB[a.action], port=a.port,
+                                proto=a.proto, sources=a.sources)
+        if change.locks_out_management(port, self._mgmt_sources):
+            return ExecOutcome(applied=False, resolved_command=label,
+                               blocked_reason=f"lockout guard: refuses a rule that would cut "
+                                              f"management SSH (port {port})")
+        apply_argvs = self._ufw_argvs(a)
+        if apply_argvs is None:
+            return ExecOutcome(applied=False, resolved_command=label,
+                               blocked_reason=f"unsupported firewall action: {a.action}")
+        last = None
+        for argv in apply_argvs:
+            out, reason = _run(argv)
+            if out is None:
+                return ExecOutcome(applied=False, resolved_command=label, blocked_reason=reason)
+            if out.exit_code != 0:
+                return ExecOutcome(applied=False, resolved_command=label, result=out,
+                                   blocked_reason=f"{label} failed (exit {out.exit_code})")
+            last = out
+
+        # Timed auto-revert for rules that could cut access: schedule the undo,
+        # then confirm management is still reachable; cancel on success, leave it
+        # armed (so the rule self-reverts) on failure.
+        undo = self._ufw_undo_argv(a)
+        if undo is not None:
+            unit = f"ai-defense-fw-revert-{a.port}-{a.proto}"
+            _run(["sudo", "-n", "systemd-run", f"--on-active={a.revert_after_seconds}s",
+                  f"--unit={unit}", "--description=ai-defense firewall auto-revert", *undo])
+            h_out, _ = _run(["true"])       # does the management session still respond?
+            if h_out is None or h_out.exit_code != 0:
+                return ExecOutcome(applied=False, resolved_command=label,
+                                   blocked_reason=f"post-apply health check failed; change "
+                                                  f"auto-reverts in {a.revert_after_seconds}s")
+            _run(["sudo", "-n", "systemctl", "stop", f"{unit}.timer"])   # confirmed -> rule sticks
+            note = (f"auto-revert armed ({a.revert_after_seconds}s) then cancelled — "
+                    f"management reachable")
+            return ExecOutcome(applied=True, resolved_command=label, result=last, diff=note)
+        return ExecOutcome(applied=True, resolved_command=label, result=last)
+
+    @staticmethod
+    def _ufw_argvs(a: FirewallRule) -> list[list[str]] | None:
+        p = f"{a.port}/{a.proto}"
+        if a.action == "deny":
+            return [["sudo", "-n", "ufw", "deny", p]]
+        if a.action == "allow" and not a.sources:
+            return [["sudo", "-n", "ufw", "allow", p]]
+        if a.action in ("allow", "restrict_source") and a.sources:
+            return [["sudo", "-n", "ufw", "allow", "from", src, "to", "any",
+                     "port", str(a.port), "proto", a.proto] for src in a.sources]
+        if a.action == "remove_rule":
+            return [["sudo", "-n", "ufw", "delete", a.removes, p]]
+        return None
+
+    @staticmethod
+    def _ufw_undo_argv(a: FirewallRule) -> list[str] | None:
+        # single command the auto-revert timer runs (as root via systemd-run, no sudo)
+        p = f"{a.port}/{a.proto}"
+        if a.action == "deny":
+            return ["ufw", "delete", "deny", p]
+        if a.action == "allow" and not a.sources:
+            return ["ufw", "delete", "allow", p]
+        return None     # multi-source / remove_rule: no single-command auto-undo

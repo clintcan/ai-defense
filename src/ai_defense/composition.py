@@ -55,6 +55,7 @@ from .ssh.catalog import (
     ConfigBlockWrite,
     DropInRemove,
     DropInWrite,
+    FirewallRule,
     ModuleBlacklist,
     ModuleUnblacklist,
     ServiceStateChange,
@@ -96,6 +97,8 @@ def _mitigation_action_kind(action_name: str) -> str:
         return "kernel-module"
     if isinstance(action, ServiceStateChange):
         return "service"
+    if isinstance(action, FirewallRule):
+        return "firewall"
     return "unknown"
 
 

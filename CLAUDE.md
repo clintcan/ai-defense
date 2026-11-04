@@ -239,7 +239,11 @@ record — and internal error text is never surfaced to the planner.
     name is on `HARDENING_MODULE_ALLOWLIST` — `/etc/modprobe.d` drop-in + `modprobe -r`);
   - a **service** action (`services.py`: `systemctl disable/mask/enable`,
     **denylist-first** so a `PROTECTED_SERVICES` unit — auditd/firewalld/ufw/sshd/… —
-    can never be disabled, even with approval).
+    can never be disabled, even with approval);
+  - a **firewall** action (`firewall.py`: a `ufw` rule edit, with a **lockout guard**
+    that refuses any rule cutting management SSH and a **timed auto-revert** —
+    scheduled via `systemd-run`, cancelled only once a post-apply health check
+    confirms the host is still reachable).
 
   The loader **rejects** any entry whose action isn't already reviewed, so a
   dropped file can map a CVE to an existing action but can never introduce a new

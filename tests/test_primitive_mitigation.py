@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 from ai_defense.composition import build_demo_engine
 from ai_defense.mcp_server import handle_call
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
-from ai_defense.ssh.catalog import MODULE_ACTIONS, SERVICE_ACTIONS, ModuleBlacklist
+from ai_defense.ssh.catalog import (
+    FIREWALL_ACTIONS,
+    MODULE_ACTIONS,
+    SERVICE_ACTIONS,
+    ModuleBlacklist,
+)
+from ai_defense.ssh.catalog.firewall import FirewallRule
 from ai_defense.ssh.catalog.services import ServiceStateChange
 from ai_defense.ssh.config_exec import ConfigExecutor
 from ai_defense.ssh.executor import CommandOutput, SSHExecutor
@@ -142,3 +148,57 @@ def test_list_mitigations_tags_module_and_service_kinds():
     rows = {r["mitigation_id"]: r for r in eng.list_mitigations()}
     assert rows["disable-dccp-module"]["kind"] == "kernel-module"
     assert rows["disable-rpcbind"]["kind"] == "service"
+    assert rows["firewall-deny-memcached-udp"]["kind"] == "firewall"
+
+
+# --- firewall ------------------------------------------------------------
+
+def test_firewall_deny_applies_with_autorevert_then_confirms():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        FIREWALL_ACTIONS["firewall.deny_udp_memcached"], host="h", key="k", user="ubuntu")
+    assert out.applied
+    argvs = _argvs(tp)
+    assert ("sudo", "-n", "ufw", "deny", "11211/udp") in argvs            # rule applied
+    assert any(a[:3] == ("sudo", "-n", "systemd-run") for a in argvs)      # auto-revert armed
+    assert ("true",) in argvs                                             # health check
+    assert any(a[:4] == ("sudo", "-n", "systemctl", "stop") for a in argvs)  # timer cancelled
+    assert out.diff and "auto-revert" in out.diff
+
+
+def test_firewall_lockout_guard_refuses_cutting_management_ssh():
+    # a deny on the port we manage over (22) is refused outright.
+    out = ConfigExecutor(SSHExecutor(_T())).apply(
+        FirewallRule("firewall.deny_ssh", "deny", 22, "tcp"),
+        host="h", key="k", user="ubuntu", port=22)
+    assert not out.applied and "lockout guard" in out.blocked_reason
+
+
+def test_firewall_leaves_rule_armed_when_health_check_fails():
+    tp = _T(fail_on="true")                     # management unreachable after the change
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        FIREWALL_ACTIONS["firewall.deny_udp_memcached"], host="h", key="k")
+    assert not out.applied and "auto-revert" in out.blocked_reason
+    # the timer was NOT cancelled, so the change self-reverts
+    assert not any(a[:4] == ("sudo", "-n", "systemctl", "stop") for a in _argvs(tp))
+
+
+def test_firewall_reverse_removes_the_rule():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        FIREWALL_ACTIONS["firewall.deny_udp_memcached.reverse"], host="h", key="k")
+    assert out.applied
+    assert ("sudo", "-n", "ufw", "delete", "deny", "11211/udp") in _argvs(tp)
+
+
+def test_engine_mitigate_and_revert_firewall():
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    eng.registry.register(_host("hf"))
+    cve = "CVE-2018-1000115"
+    p = eng.mitigate("hf", cve)
+    eng.approve(p.data["change_set_id"])
+    done = handle_call(eng, "mitigate", {"asset_id": "hf", "cve": cve})
+    assert done["ok"] is True and done["data"]["rollback"]["kind"] == "firewall_rule"
+    r = eng.revert_mitigation("hf", cve)
+    eng.approve(r.data["change_set_id"])
+    assert handle_call(eng, "revert_mitigation", {"asset_id": "hf", "cve": cve})["ok"] is True

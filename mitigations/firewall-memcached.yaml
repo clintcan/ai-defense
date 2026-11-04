@@ -1,0 +1,20 @@
+# CVE-2018-1000115 — memcached listening on UDP 11211 is abusable for
+# reflection/amplification DDoS. Where memcached must stay reachable internally,
+# the mitigation is to block UDP 11211 at the host firewall. Apply adds a ufw deny
+# rule (guarded against locking out management SSH, with a timed auto-revert if the
+# host becomes unreachable); reverse deletes the rule.
+# Run it with:  mitigate <host> CVE-2018-1000115
+#               revert_mitigation <host> CVE-2018-1000115
+#
+# Both actions are allowlisted firewall actions in the reviewed catalog
+# (ssh/catalog/firewall.py); a file may reference one but can't define a new one.
+# ufw-only; the lockout guard refuses any rule that would cut management SSH.
+- id: firewall-deny-memcached-udp
+  cves: [CVE-2018-1000115]
+  title: Block memcached UDP 11211 at the host firewall (amplification DDoS)
+  source_ref: https://www.cve.org/CVERecord?id=CVE-2018-1000115
+  template: firewall.deny_udp_memcached
+  rollback_template: firewall.deny_udp_memcached.reverse
+  description: >-
+    `ufw deny 11211/udp` with a lockout guard and a timed auto-revert if the host
+    stops responding after the change; reverse deletes the deny rule.

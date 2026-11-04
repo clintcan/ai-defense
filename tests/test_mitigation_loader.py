@@ -98,6 +98,7 @@ def test_shipped_mitigations_folder_is_valid():
         "php-disable-session-upload-progress"
     assert reg.for_cve("CVE-2017-6074").mitigation_id == "disable-dccp-module"   # kernel module
     assert reg.for_cve("CVE-2017-8779").mitigation_id == "disable-rpcbind"       # service
+    assert reg.for_cve("CVE-2018-1000115").mitigation_id == "firewall-deny-memcached-udp"
     assert reg.for_cve("CVE-2019-11479") is not None
     assert reg.for_cve("MPTCP") is not None                # mptcp hardening
 

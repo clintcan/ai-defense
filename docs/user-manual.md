@@ -494,7 +494,8 @@ problem to read).
 - **Preflight** — a read-only check of whether a server is ready for an OS
   upgrade. It only advises; it never upgrades anything.
 - **OS upgrade** — moving an end-of-life server to a supported release (in place,
-  e.g. Ubuntu 18.04 → 20.04). AI Defense's most heavily guarded action: a
+  e.g. Ubuntu 18.04 → 20.04, or Debian 10 → 11 — AI Defense detects which and
+  drives it accordingly). AI Defense's most heavily guarded action: a
   mandatory snapshot, two approvals, and an automatic **stop-and-keep-the-snapshot**
   if the server doesn't come back healthy after the reboot.
 - **Mitigation** — an official, documented *workaround* for a flaw you can't

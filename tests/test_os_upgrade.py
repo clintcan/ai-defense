@@ -6,10 +6,11 @@ tested end-to-end through the engine."""
 from datetime import UTC, datetime, timedelta
 
 from ai_defense.cloud.tools import SNAPSHOT_TOOL
-from ai_defense.composition import build_demo_engine
+from ai_defense.composition import build_demo_engine, build_engine
 from ai_defense.mcp_server import handle_call
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
 from ai_defense.scanner.scanner import HostFindings
+from ai_defense.ssh.config_exec import ConfigExecutor
 from ai_defense.ssh.executor import CommandOutput, SSHExecutor
 from ai_defense.ssh.tools import OS_UPGRADE_TIMEOUT_S, OS_UPGRADE_TOOL, make_os_upgrade_tool
 from ai_defense.toolset.intents import ActionClass, ToolResult
@@ -27,10 +28,11 @@ _READY_STATE = {"reboot_required": False, "disk_free_mb": 20480,
                 "held_packages": [], "broken_packages_report": ""}
 
 
-def _findings(version: str | None, *, reachable: bool = True) -> HostFindings:
+def _findings(version: str | None, *, reachable: bool = True,
+              distro: str = "ubuntu", codename: str = "x") -> HostFindings:
     if not reachable:
         return HostFindings(asset_id="h", misconfigurations=["scan failed: TimeoutError"])
-    osr = {"ID": "ubuntu", "VERSION_ID": version, "VERSION_CODENAME": "x"} if version else {}
+    osr = {"ID": distro, "VERSION_ID": version, "VERSION_CODENAME": codename} if version else {}
     return HostFindings(asset_id="h", os_release=osr, system_state=_READY_STATE)
 
 
@@ -155,6 +157,21 @@ def test_fleet_uses_fleet_action_class():
     _wf(disp, _Scanner(_findings("18.04"), [_findings("20.04")])).run("h", canary=False)
     up = next(i for i in disp.calls if i.tool == OS_UPGRADE_TOOL)
     assert up.action_class == ActionClass.OS_UPGRADE_FLEET
+
+
+def test_debian_threads_distro_and_codenames_from_the_preflight():
+    # distro/old_codename/new_codename must come from the release-table lookup
+    # (via the preflight report), never be left for the tool to guess.
+    disp = _Dispatcher(upgrade="ok")
+    sc = _Scanner(_findings("10", distro="debian", codename="buster"),
+                  [_findings(None, reachable=False),
+                   _findings("11", distro="debian", codename="bullseye")])
+    r = _wf(disp, sc).run("h")
+    assert r.status == UPGRADED and r.post_os == "11"
+    up = next(i for i in disp.calls if i.tool == OS_UPGRADE_TOOL)
+    assert up.params["distro"] == "debian"
+    assert up.params["old_codename"] == "buster"
+    assert up.params["new_codename"] == "bullseye"
 
 
 # --- end-to-end through the engine (real policy + approval gate) ---------
@@ -294,6 +311,121 @@ def test_tool_upgrade_command_failure_does_not_reboot():
     assert not any("systemctl reboot" in " ".join(argv) for (argv, _t) in tp.calls)
 
 
+# --- the os.release_upgrade tool: Debian path ----------------------------
+
+class _DebianTransport:
+    """exec stub for the Debian sequence: grep sources.list.d, cat/tee
+    sources.list, apt-get update (validate), apt-get full-upgrade, reboot."""
+
+    def __init__(self, *, sources="deb http://deb.debian.org/debian buster main\n",
+                 sld_hit=False, apt_update_exit=0, upgrade_exit=0, reboot="ok"):
+        self.sources = sources
+        self.sld_hit = sld_hit
+        self.apt_update_exit = apt_update_exit
+        self.upgrade_exit = upgrade_exit
+        self.reboot = reboot
+        self.calls: list = []
+
+    def run(self, host, argv, *, key, timeout, user="root", port=22, input=None):
+        self.calls.append((tuple(argv), input, timeout))
+        a = " ".join(argv)
+        if argv[:2] == ["grep", "-rl"]:
+            out = "/etc/apt/sources.list.d/extra.list" if self.sld_hit else ""
+            return CommandOutput(0 if self.sld_hit else 1, out, "")
+        if argv[:3] == ["sudo", "-n", "cat"]:
+            return CommandOutput(0, self.sources, "")
+        if argv[:3] == ["sudo", "-n", "tee"] and input is not None:
+            self.sources = input
+            return CommandOutput(0, input, "")
+        if argv[:3] == ["sudo", "-n", "cp"]:
+            return CommandOutput(0, "", "")
+        if "apt-get update" in a:
+            return CommandOutput(self.apt_update_exit, "", "" if self.apt_update_exit == 0
+                                 else "404  Not Found")
+        if "apt-get full-upgrade --simulate" in a:
+            return CommandOutput(0, "", "")
+        if "apt-get -y full-upgrade" in a:
+            return CommandOutput(self.upgrade_exit, "upgraded", "")
+        if "systemctl reboot" in a:
+            if self.reboot == "drop":
+                raise OSError("connection dropped by reboot")
+            return CommandOutput(0 if self.reboot == "ok" else 1, "", "")
+        return CommandOutput(0, "", "")
+
+
+def _debian_tool(tp, *, wire_config=True):
+    ce = ConfigExecutor(SSHExecutor(tp)) if wire_config else None
+    spec = make_os_upgrade_tool(
+        SSHExecutor(tp), lambda _a: ConnectionInfo(host="h", key_ref="k", user="root"),
+        config_executor=ce)
+    return spec.executor
+
+
+_DEBIAN_PARAMS = {"asset_id": "h", "distro": "debian", "old_codename": "buster",
+                  "new_codename": "bullseye", "target_version": "11", "snapshot_id": "snap-1"}
+
+
+def test_debian_happy_path_swaps_sources_then_upgrades_and_reboots():
+    tp = _DebianTransport()
+    res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert res.ok and res.data["reboot_issued"] is True
+    assert "bullseye" in tp.sources and "buster" not in tp.sources
+    # the full-upgrade (and its --simulate dry-run) ran with the long timeout
+    up_call = next(t for (argv, _i, t) in tp.calls
+                   if "apt-get" in argv and "full-upgrade" in argv and "-y" in argv)
+    assert up_call == OS_UPGRADE_TIMEOUT_S
+    assert any("apt-get update" in " ".join(a) for (a, _i, _t) in tp.calls)   # swap validated
+
+
+def test_debian_missing_codenames_refused():
+    res = _debian_tool(_DebianTransport())(
+        {"asset_id": "h", "distro": "debian"}, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "missing codename info" in res.summary
+
+
+def test_debian_without_config_executor_refused():
+    res = _debian_tool(_DebianTransport(), wire_config=False)(
+        _DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "not wired" in res.summary
+
+
+def test_debian_unsafe_codename_refused():
+    res = _debian_tool(_DebianTransport())(
+        {**_DEBIAN_PARAMS, "old_codename": "buster; rm -rf /"},
+        resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "unsafe codename" in res.summary
+
+
+def test_debian_stale_thirdparty_source_refused_before_any_change():
+    tp = _DebianTransport(sld_hit=True)
+    res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "sources.list.d" in res.summary
+    assert "buster" in tp.sources            # sources.list was never touched
+    assert not any(c[0][:3] == ("sudo", "-n", "tee") for c in tp.calls)
+
+
+def test_debian_swap_validate_failure_restores_and_refuses():
+    tp = _DebianTransport(apt_update_exit=1)      # apt-get update (the swap's validate) fails
+    res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "sources.list rewrite failed" in res.summary
+    assert any(c[0][:3] == ("sudo", "-n", "cp") for c in tp.calls)   # backup/restore ran
+    assert not any("full-upgrade" in " ".join(c[0]) for c in tp.calls)  # upgrade never ran
+
+
+def test_debian_full_upgrade_failure_does_not_reboot():
+    tp = _DebianTransport(upgrade_exit=1)
+    res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "full-upgrade command failed" in res.summary
+    assert not any("systemctl reboot" in " ".join(c[0]) for c in tp.calls)
+    assert "bullseye" in tp.sources     # sources.list stays swapped; a retry won't re-swap
+
+
+def test_debian_reboot_refused_is_not_reported_as_success():
+    tp = _DebianTransport(reboot="refused")
+    res = _debian_tool(tp)(_DEBIAN_PARAMS, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "NOT rebooted" in res.summary
+
+
 def test_mcp_os_upgrade_pending_shape():
     eng = build_demo_engine()
     eng.registry.register(_host("mcp-h"))
@@ -301,3 +433,39 @@ def test_mcp_os_upgrade_pending_shape():
     assert out["status"] == "upgrade_pending" and out["ok"] is False
     assert out["change_set_id"] and out["target_version"] == "20.04"
     assert out["snapshot_ids"] and "approve" in out["next"]
+
+
+# --- end-to-end through the engine: Debian host ---------------------------
+
+class _DebianInspector:
+    """Reports a static Debian 10 (buster) host — mirrors demo.py's DemoInspector
+    but for the Debian path."""
+
+    def collect(self, asset_id):
+        return {"installed_packages": {}, "applied_patches": [], "misconfigurations": [],
+                "os_release": {"ID": "debian", "VERSION_ID": "10",
+                               "VERSION_CODENAME": "buster"}}
+
+    def collect_upgrade_state(self, asset_id):
+        return {"reboot_required": False, "disk_free_mb": 20480,
+                "held_packages": [], "broken_packages_report": ""}
+
+
+def test_engine_debian_canary_swaps_sources_and_upgrades_then_halts_in_sim():
+    eng = build_engine(inspector=_DebianInspector(), transport=_DebianTransport())
+    _fast_reconnect(eng)
+    eng.registry.register(_host("deb-h"))
+
+    p = eng.os_upgrade("deb-h")
+    assert p.status == UPGRADE_PENDING and p.preflight.distro == "debian"
+    assert p.preflight.target_version == "11" and p.preflight.target_codename == "bullseye"
+
+    eng.approve(p.change_set_id, "op1")
+    eng.approve(p.change_set_id, "op2")
+    done = eng.os_upgrade("deb-h")
+    # the mutating sequence (third-party check, sources swap, full-upgrade, reboot)
+    # all ran and succeeded; the static inspector never reports the host "down", so
+    # the reconnect confirmation can't complete -> halt, snapshot retained (same
+    # fail-safe shape as the Ubuntu engine test).
+    assert done.upgrade.ok and done.status == HEALTH_FAILED_HALTED
+    assert done.snapshot_ids == p.snapshot_ids

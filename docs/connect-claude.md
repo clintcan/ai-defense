@@ -274,7 +274,9 @@ ai-defense mcp --db "..." --ssh-keys "..." --osv --kev --mitigations-dir mitigat
 When a host is on an **end-of-life** OS, patching isn't enough — the fix is moving
 to a supported release. After the read-only `upgrade_preflight` reports a host
 `READY`, ask Claude to *"upgrade the OS on `<host>`"* and the **`os_upgrade`**
-workflow drives it, in-place (Ubuntu `do-release-upgrade`), with every rail on:
+workflow drives it in-place (**Ubuntu** via `do-release-upgrade`; **Debian** by
+rewriting `/etc/apt/sources.list` to the new codename, then `apt-get full-upgrade`
+— the host's OS is detected automatically, you don't choose), with every rail on:
 it refuses a host that isn't `READY`, takes a **mandatory snapshot first**, runs
 the upgrade+reboot as **one human-approved action** (the canary needs **two**
 approvals), then polls for the host to come back **on the target release**. If it
@@ -284,6 +286,9 @@ human restores it. It returns a pending change-set; approve it, then ask Claude 
 *"try the upgrade again"* (it reuses the snapshot). The fleet (`canary=false`) only
 unlocks after a canary has come back healthy. For cloud images the vendor may
 prefer rebuild-from-blueprint + migrate; that stays a human decision, not automated.
+On a Debian host, if a third-party apt source still names the old release, or
+`sources.list` uses symbolic names (`stable`/`oldstable`) the workflow can't
+confirm, it refuses rather than guesses — check and retry.
 
 ## Safeguards that remain in force
 

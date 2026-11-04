@@ -13,7 +13,14 @@ mitigation file can point at one but can't define a new one.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+# Real Debian/Ubuntu codenames are plain lowercase words (buster, bullseye, …).
+# Defense in depth: reject anything else even though the only legitimate caller
+# (the OS_UPGRADE workflow) sources these from the reviewed release table, never
+# planner text.
+_CODENAME_RE = re.compile(r"^[a-z0-9]+$")
 
 # Only these conf.d-style directories may receive a managed drop-in. Each holds
 # additive, independently-removable files — never a monolithic system file.
@@ -60,6 +67,7 @@ ALLOWED_EDIT_PATHS: tuple[str, ...] = (
     "/etc/ssh/sshd_config",
     "/etc/sysctl.conf",
     "/etc/login.defs",
+    "/etc/apt/sources.list",   # Debian in-place release upgrade: codename swap
 )
 
 
@@ -84,6 +92,30 @@ class ConfigBlockRemove:
     marker: str
     validate: tuple[str, ...] = ()
     reload: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AptSourcesCodenameSwap:
+    """Debian in-place upgrade step: rewrite every whole-word occurrence of
+    ``old_codename`` to ``new_codename`` in an apt sources file (fixed path, must
+    be in ``ALLOWED_EDIT_PATHS``). Unlike the other in-place edits this one is
+    parameterized per-call (the codenames vary per host/upgrade) rather than a
+    fixed catalog singleton — the executor still enforces the path allowlist on
+    every call regardless of where the instance came from, so a dynamically built
+    one is checked exactly like a static entry. ``old_codename``/``new_codename``
+    must come from the reviewed release table (``upgrade/releases.py``), never
+    from planner-supplied text."""
+    name: str
+    path: str
+    old_codename: str
+    new_codename: str
+    validate: tuple[str, ...] = ()
+    reload: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        for cn in (self.old_codename, self.new_codename):
+            if not _CODENAME_RE.match(cn):
+                raise ValueError(f"unsafe codename value: {cn!r}")
 
 
 _MPTCP_PATH = "/etc/sysctl.d/80-ai-defense-mptcp.conf"
@@ -184,7 +216,7 @@ CONFIG_ACTIONS: dict[str, DropInWrite | DropInRemove] = {
 def _action_path_ok(a) -> bool:
     if isinstance(a, (DropInWrite, DropInRemove)):
         return dir_allowed(a.path)
-    if isinstance(a, (ConfigBlockWrite, ConfigBlockRemove)):
+    if isinstance(a, (ConfigBlockWrite, ConfigBlockRemove, AptSourcesCodenameSwap)):
         return edit_path_allowed(a.path)
     return False
 

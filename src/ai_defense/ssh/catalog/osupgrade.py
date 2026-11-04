@@ -1,14 +1,18 @@
 """OS release-upgrade command templates (reviewed, allowlisted).
 
-These drive an **in-place** Ubuntu release upgrade (``do-release-upgrade``) and
-the reboot that follows, plus a read-only probe used to confirm the new release
-after the host comes back. They are the mutating core of the strongly-gated
-``OS_UPGRADE`` workflow (CLAUDE.md 6c) — reachable only through that workflow,
-under the ``os_upgrade_canary`` / ``os_upgrade_fleet`` action classes, after a
-mandatory snapshot and human approval.
+These drive an **in-place** release upgrade and the reboot that follows, plus a
+read-only probe used to confirm the new release after the host comes back. They
+are the mutating core of the strongly-gated ``OS_UPGRADE`` workflow (CLAUDE.md 6c)
+— reachable only through that workflow, under the ``os_upgrade_canary`` /
+``os_upgrade_fleet`` action classes, after a mandatory snapshot and human
+approval.
 
-Debian in-place (edit sources + ``apt full-upgrade``) is intentionally not here
-yet — v1 is Ubuntu-only, matching the release table and the preflight.
+Ubuntu drives the whole upgrade through ``do-release-upgrade``. Debian has no
+equivalent single wrapper: the sequence is rewrite ``/etc/apt/sources.list``
+(the old codename -> the new one — ``AptSourcesCodenameSwap`` in
+``catalog/configs.py``, run through the managed backup/diff/validate/restore
+edit primitive, validated by ``apt-get update``), then ``apt.full_upgrade``
+below, then the same ``os.reboot``.
 """
 
 from __future__ import annotations
@@ -35,5 +39,15 @@ TEMPLATES: dict[str, CommandTemplate] = {
     # host to come back via os.read_release.
     "os.reboot": CommandTemplate(
         "os.reboot", ["sudo", "-n", "systemctl", "reboot"], read_only=False,
+    ),
+    # Debian: the actual release-level upgrade, run after sources.list is
+    # repointed at the new codename and `apt-get update` has validated it.
+    # `--simulate` is apt's dry-run (no download, no change) — the direct
+    # equivalent of Ubuntu's `do-release-upgrade -c`.
+    "apt.full_upgrade": CommandTemplate(
+        "apt.full_upgrade",
+        ["sudo", "-n", "apt-get", "-y", "full-upgrade"],
+        read_only=False,
+        dry_run_variant=["apt-get", "full-upgrade", "--simulate"],
     ),
 }

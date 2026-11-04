@@ -11,6 +11,10 @@ redirection, no sftp).
   insert/replace/remove only a marker-delimited block the tool owns, **back up**
   the file first, show a **diff**, write, **validate** (``sshd -t`` etc.), and
   **restore from backup** if validation fails — the CLAUDE.md 6a dance.
+- **Debian codename swap** (``AptSourcesCodenameSwap``): the same backup/diff/
+  validate/restore dance, but for an in-place OS upgrade's ``/etc/apt/sources.list``
+  rewrite (old release codename -> new), validated with ``apt-get update``.
+  Refuses (fail-safe) rather than guesses if the file names neither codename.
 
 All paths are checked against the allowlists (default deny). Returns an
 :class:`ExecOutcome` so the mitigation tool treats every action kind uniformly.
@@ -21,6 +25,7 @@ from __future__ import annotations
 import difflib
 
 from .catalog import (
+    AptSourcesCodenameSwap,
     ConfigBlockRemove,
     ConfigBlockWrite,
     DropInRemove,
@@ -31,7 +36,7 @@ from .catalog import (
 from .catalog.firewall import FirewallRule
 from .catalog.modules import ModuleBlacklist, ModuleUnblacklist
 from .catalog.services import ServiceStateChange
-from .config_edit import ensure_block, remove_block
+from .config_edit import codename_present, ensure_block, remove_block, swap_codename
 from .executor import ExecOutcome, SSHExecutor
 from .hardening import (
     HARDENING_MODULE_ALLOWLIST,
@@ -59,7 +64,7 @@ class ConfigExecutor:
             return self._write(action, host=host, key=key, user=user, port=port)
         if isinstance(action, DropInRemove):
             return self._remove(action, host=host, key=key, user=user, port=port)
-        if isinstance(action, (ConfigBlockWrite, ConfigBlockRemove)):
+        if isinstance(action, (ConfigBlockWrite, ConfigBlockRemove, AptSourcesCodenameSwap)):
             return self._edit(action, host=host, key=key, user=user, port=port)
         if isinstance(action, (ModuleBlacklist, ModuleUnblacklist)):
             return self._module(action, host=host, key=key, user=user, port=port)
@@ -118,10 +123,12 @@ class ConfigExecutor:
         return ExecOutcome(applied=ok, resolved_command=cmd, result=out,
                            blocked_reason=None if ok else f"remove failed (exit {out.exit_code})")
 
-    # -- in-place marker-block edits -------------------------------------
+    # -- in-place marker-block edits & the Debian codename swap -----------
 
     def _edit(self, a, *, host, key, user, port) -> ExecOutcome:
-        label = f"edit {a.path} [block {a.marker}]"
+        is_swap = isinstance(a, AptSourcesCodenameSwap)
+        label = (f"edit {a.path} [codename {a.old_codename}->{a.new_codename}]" if is_swap
+                 else f"edit {a.path} [block {a.marker}]")
         if not edit_path_allowed(a.path):
             return ExecOutcome(applied=False, resolved_command=label,
                                blocked_reason=f"path not in the allowlisted edit set: {a.path}")
@@ -133,8 +140,23 @@ class ConfigExecutor:
             return ExecOutcome(applied=False, resolved_command=label, result=out,
                                blocked_reason=f"could not read {a.path} (exit {out.exit_code})")
         current = out.stdout
-        new = (ensure_block(current, a.marker, a.body) if isinstance(a, ConfigBlockWrite)
-               else remove_block(current, a.marker))
+        if is_swap:
+            # Fail safe on ambiguity (CLAUDE.md #7): if the file names neither the
+            # old nor the new codename, don't guess — a symbolic-name sources.list
+            # (`stable`/`oldstable`) needs no edit at all, but we can't tell that
+            # apart from a genuinely unexpected layout from the codenames alone.
+            if not (codename_present(current, a.old_codename)
+                    or codename_present(current, a.new_codename)):
+                return ExecOutcome(
+                    applied=False, resolved_command=label,
+                    blocked_reason=(f"neither '{a.old_codename}' nor '{a.new_codename}' found "
+                                    f"in {a.path} — if it uses symbolic release names "
+                                    f"(stable/oldstable) no edit is needed; verify and retry, "
+                                    f"or edit sources.list manually first"))
+            new = swap_codename(current, a.old_codename, a.new_codename)
+        else:
+            new = (ensure_block(current, a.marker, a.body) if isinstance(a, ConfigBlockWrite)
+                   else remove_block(current, a.marker))
         diff = "".join(difflib.unified_diff(
             current.splitlines(keepends=True), new.splitlines(keepends=True),
             fromfile=a.path, tofile=f"{a.path} (proposed)"))

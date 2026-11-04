@@ -309,27 +309,42 @@ host.
   Exposed as the `upgrade_preflight` MCP tool.
 - **Driving** the upgrade is a separate, **more strongly gated** `OS_UPGRADE`
   workflow (`upgrade/workflow.py`, the `os_upgrade` tool / `Engine.os_upgrade`),
-  v1 **in-place, Ubuntu-first** (`do-release-upgrade`). The state machine:
-  preflight gate (must be `READY`) → **mandatory snapshot** (PROTECTIVE,
-  autonomous; never upgrade without a restore point) → human-approved
-  **upgrade + reboot** as one reviewed action (`os.release_upgrade`, dry-run
-  `do-release-upgrade -c` first) under `os_upgrade_canary` (**two approvals**) /
-  `os_upgrade_fleet` (two, `after: canary_health_ok`, blast cap small) → **confirm a
-  real reboot** (the host must be observed to go *down* then return — not merely be
-  reachable, since `do-release-upgrade` rewrites `/etc/os-release` to the new
-  release *before* the reboot) → **health check** (back on the target `VERSION_ID`?)
-  → **post-upgrade re-scan**. The mandatory snapshot's ids are held **server-side**
-  (the model never supplies one, so the backup invariant can't be met by a forged
-  id). On failure it **halts and keeps the snapshot as the restore point** (operator
-  decision 2026-11-05): an in-place dist-upgrade can't be auto-reverted, so there is
-  no silent rollback — a human restores the snapshot. For cloud images (e.g.
-  Lightsail) the vendor-preferred path may be rebuild-from-blueprint + migrate
-  rather than in-place; that stays a preflight recommendation, not automated.
-  **Known v1 limitations:** the reconnect probe reuses the scanner's session rather
-  than proving a brand-new login, and the down→up check (not a boot-id compare) can
-  in principle be fooled by a transient blip; the canary→fleet unlock is a
-  session-wide flag; Debian in-place isn't wired. All fail safe (a wrong guess
-  halts and keeps the backup, never a silent change).
+  **in-place**, both **Ubuntu** and **Debian**. The state machine: preflight gate
+  (must be `READY`) → **mandatory snapshot** (PROTECTIVE, autonomous; never
+  upgrade without a restore point) → human-approved **upgrade + reboot** as one
+  reviewed action (`os.release_upgrade`) under `os_upgrade_canary` (**two
+  approvals**) / `os_upgrade_fleet` (two, `after: canary_health_ok`, blast cap
+  small) → **confirm a real reboot** (the host must be observed to go *down* then
+  return — not merely be reachable, since `do-release-upgrade` rewrites
+  `/etc/os-release` to the new release *before* the reboot) → **health check**
+  (back on the target `VERSION_ID`?) → **post-upgrade re-scan**. The mandatory
+  snapshot's ids are held **server-side** (the model never supplies one, so the
+  backup invariant can't be met by a forged id). On failure it **halts and keeps
+  the snapshot as the restore point** (operator decision 2026-11-05): an in-place
+  dist-upgrade can't be auto-reverted, so there is no silent rollback — a human
+  restores the snapshot. For cloud images (e.g. Lightsail) the vendor-preferred
+  path may be rebuild-from-blueprint + migrate rather than in-place; that stays a
+  preflight recommendation, not automated.
+  - **Ubuntu** drives the whole upgrade through `do-release-upgrade` (dry-run
+    `-c` first).
+  - **Debian** has no equivalent single wrapper, so the tool sequences it:
+    a read-only check that no third-party source under
+    `/etc/apt/sources.list.d/` still names the old codename (refuses rather than
+    upgrades against inconsistent repos); rewrite `/etc/apt/sources.list` (old
+    codename → new, from the reviewed release table, never planner text) through
+    the **same managed backup/diff/validate/restore edit primitive** as 6a
+    (`AptSourcesCodenameSwap`, validated by `apt-get update`, restored on
+    failure); `apt-get full-upgrade` (dry-run `--simulate` first); the same
+    reboot step. If the file names neither the old nor the new codename (e.g. a
+    symbolic `stable`/`oldstable` sources.list), it **refuses rather than
+    guesses** (rule #7) — a human verifies first.
+  **Known v1 limitations:** the reconnect probe reuses the scanner's session
+  rather than proving a brand-new login, and the down→up check (not a boot-id
+  compare) can in principle be fooled by a transient blip; the canary→fleet
+  unlock is a session-wide flag; the Debian third-party-source check is
+  best-effort (`.list` format only, not the newer `deb822` `.sources` format).
+  All fail safe (a wrong guess halts and keeps the backup, never a silent
+  change).
 
 ### 6a. Managed configuration primitives
 Config/module/service remediations are expressed as declarative, reviewable

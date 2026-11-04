@@ -519,12 +519,14 @@ def build_engine(
 
     tools = ToolRegistry()
     ssh_executor = SSHExecutor(the_transport)
+    config_executor = ConfigExecutor(ssh_executor)
     tools.register(make_security_update_tool(ssh_executor, conn_resolver))
     tools.register(make_mitigation_tool(ssh_executor, conn_resolver,
                                         mitigations=mitigations.by_id,
-                                        config_executor=ConfigExecutor(ssh_executor),
+                                        config_executor=config_executor,
                                         config_actions=PRIMITIVE_ACTIONS))
-    tools.register(make_os_upgrade_tool(ssh_executor, conn_resolver))
+    tools.register(make_os_upgrade_tool(ssh_executor, conn_resolver,
+                                        config_executor=config_executor))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))

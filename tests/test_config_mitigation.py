@@ -5,11 +5,13 @@ mitigate path."""
 import os
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from ai_defense.composition import build_demo_engine
 from ai_defense.mcp_server import handle_call
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
-from ai_defense.ssh.catalog import CONFIG_ACTIONS, DropInWrite
-from ai_defense.ssh.config_edit import ensure_block, remove_block
+from ai_defense.ssh.catalog import CONFIG_ACTIONS, AptSourcesCodenameSwap, DropInWrite
+from ai_defense.ssh.config_edit import codename_present, ensure_block, remove_block, swap_codename
 from ai_defense.ssh.config_exec import ConfigExecutor
 from ai_defense.ssh.executor import CommandOutput, SSHExecutor
 
@@ -103,6 +105,18 @@ def test_block_helpers_are_idempotent_and_reversible():
     assert remove_block(base, "m") == base                            # no-op if absent
 
 
+def test_swap_codename_helpers():
+    sources = ("deb http://deb.debian.org/debian buster main\n"
+               "deb http://security.debian.org/debian-security buster/updates main\n")
+    assert codename_present(sources, "buster") and not codename_present(sources, "bullseye")
+    swapped = swap_codename(sources, "buster", "bullseye")
+    assert "buster" not in swapped and swapped.count("bullseye") == 2
+    assert swap_codename(swapped, "buster", "bullseye") == swapped    # no-op: already swapped
+    assert codename_present(swapped, "bullseye") and not codename_present(swapped, "buster")
+    # whole-word only: "buster" must not match inside a longer identifier
+    assert not codename_present("deb .../oldbusterthing main\n", "buster")
+
+
 class _EditT:
     """Simulates a remote file: `cat` returns it, `tee` overwrites it."""
 
@@ -163,6 +177,54 @@ def test_inplace_edit_remove_reverses_the_block():
     assert "X11Forwarding no" in tp.content
     ce.apply(CONFIG_ACTIONS["config.sshd_disable_x11.remove"], host="h", key="k")
     assert "X11Forwarding no" not in tp.content and "ai-defense:sshd-x11" not in tp.content
+
+
+# --- Debian apt-sources codename swap (the OS_UPGRADE primitive) --------
+
+_SWAP = AptSourcesCodenameSwap(
+    "debian.swap", "/etc/apt/sources.list", "buster", "bullseye",
+    validate=("sudo", "-n", "apt-get", "update"))
+
+
+def test_codename_swap_applies_backs_up_and_validates():
+    tp = _EditT(content="deb http://deb.debian.org/debian buster main\n")
+    out = ConfigExecutor(SSHExecutor(tp)).apply(_SWAP, host="h", key="k")
+    assert out.applied and "bullseye" in tp.content and "buster" not in tp.content
+    argvs = [c[0] for c in tp.calls]
+    assert ("sudo", "-n", "cp", "/etc/apt/sources.list",
+            "/etc/apt/sources.list.ai-defense.bak") in argvs           # backed up
+    assert ("sudo", "-n", "apt-get", "update") in argvs                # validated
+
+
+def test_codename_swap_is_idempotent_on_retry():
+    tp = _EditT(content="deb http://deb.debian.org/debian bullseye main\n")  # already swapped
+    out = ConfigExecutor(SSHExecutor(tp)).apply(_SWAP, host="h", key="k")
+    assert out.applied and out.diff == ""
+    assert not any(c[0][:3] == ("sudo", "-n", "tee") for c in tp.calls)      # no re-write
+
+
+def test_codename_swap_refuses_ambiguous_sources_file():
+    # neither the old nor the new codename appears -- e.g. a symbolic stable/
+    # oldstable sources.list. Fail safe rather than guess (CLAUDE.md #7).
+    tp = _EditT(content="deb http://deb.debian.org/debian stable main\n")
+    out = ConfigExecutor(SSHExecutor(tp)).apply(_SWAP, host="h", key="k")
+    assert not out.applied and "neither" in out.blocked_reason
+    assert not any(c[0][:3] == ("sudo", "-n", "tee") for c in tp.calls)
+
+
+def test_codename_swap_restores_from_backup_on_validate_failure():
+    tp = _EditT(content="deb http://deb.debian.org/debian buster main\n",
+               fail_on="apt-get update")
+    out = ConfigExecutor(SSHExecutor(tp)).apply(_SWAP, host="h", key="k")
+    assert not out.applied and "restored" in out.blocked_reason
+    argvs = [c[0] for c in tp.calls]
+    assert ("sudo", "-n", "cp", "/etc/apt/sources.list.ai-defense.bak",
+            "/etc/apt/sources.list") in argvs                          # rolled back
+
+
+def test_codename_swap_rejects_unsafe_codename_at_construction():
+    with pytest.raises(ValueError, match="unsafe codename"):
+        AptSourcesCodenameSwap("x", "/etc/apt/sources.list", "buster && rm -rf /", "bullseye")
 
 
 def test_list_mitigations_reports_loaded_set_and_kinds():

@@ -51,6 +51,8 @@ class OsUpgradeReport:
     support_status: str | None        # supported | esm | eol
     target_version: str | None        # immediate single-step target, e.g. "20.04"
     target_codename: str | None
+    distro: str | None = None         # "ubuntu" | "debian" (lowercase, from /etc/os-release ID)
+    current_codename: str | None = None   # e.g. "buster" — needed to drive a Debian upgrade
     path: list[str] = field(default_factory=list)      # ["20.04","22.04","24.04"]
     blockers: list[Blocker] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -91,7 +93,8 @@ class OsUpgradePreflight:
             return OsUpgradeReport(
                 asset_id=findings.asset_id, verdict=UpgradeVerdict.CURRENT,
                 current_os=current_os, support_status=status,
-                target_version=None, target_codename=None, path=[], notes=notes,
+                target_version=None, target_codename=None,
+                distro=rel.distro, current_codename=rel.codename, path=[], notes=notes,
             )
 
         blockers = _blockers(findings.system_state, self._min_free_mb, notes)
@@ -110,6 +113,7 @@ class OsUpgradePreflight:
             asset_id=findings.asset_id, verdict=verdict,
             current_os=current_os, support_status=status,
             target_version=target.version, target_codename=target.codename,
+            distro=rel.distro, current_codename=rel.codename,
             path=path, blockers=blockers, notes=notes,
         )
 

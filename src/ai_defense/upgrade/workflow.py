@@ -115,12 +115,18 @@ class OsUpgradeWorkflow:
                 asset_id, SNAPSHOT_FAILED, preflight=report, snapshot=snap_result,
                 notes=["no snapshot id available; refusing to upgrade without a restore point"])
 
-        # 3. The approval-gated upgrade + reboot.
+        # 3. The approval-gated upgrade + reboot. distro/codenames come only from
+        #    the preflight's reviewed release-table lookup, never planner text —
+        #    the Debian path needs them to drive the sources.list rewrite.
         ac = ActionClass.OS_UPGRADE_CANARY if canary else ActionClass.OS_UPGRADE_FLEET
+        params = {"asset_id": asset_id, "target_version": target,
+                  "snapshot_id": snap_ids[0] if snap_ids else None,
+                  "distro": report.distro}
+        if report.distro == "debian":
+            params["old_codename"] = report.current_codename
+            params["new_codename"] = report.target_codename
         intent = Intent(
-            tool=OS_UPGRADE_TOOL,
-            params={"asset_id": asset_id, "target_version": target,
-                    "snapshot_id": snap_ids[0] if snap_ids else None},
+            tool=OS_UPGRADE_TOOL, params=params,
             targets=[asset_id], action_class=ac,
             reason=f"in-place OS upgrade of {asset_id} to {target}",
             source_ref=report.source_ref)

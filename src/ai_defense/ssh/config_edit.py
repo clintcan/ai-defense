@@ -16,6 +16,8 @@ restore-on-failure on top.
 
 from __future__ import annotations
 
+import re
+
 
 def markers(marker: str) -> tuple[str, str]:
     return (f"# >>> ai-defense:{marker} >>>", f"# <<< ai-defense:{marker} <<<")
@@ -58,3 +60,27 @@ def remove_block(content: str, marker: str) -> str:
     while new and not new[-1].strip():      # trim a trailing blank
         new.pop()
     return "\n".join(new) + "\n" if new else ""
+
+
+# --- Debian apt-sources release-codename swap ----------------------------
+#
+# A Debian in-place release upgrade rewrites /etc/apt/sources.list so its
+# `deb ...` lines name the new codename instead of the old one (e.g.
+# "buster" -> "bullseye"); unlike Ubuntu there is no single wrapper tool.
+# Kept pure and whole-word-matched for the same reasons as the block helpers;
+# the executor decides what an ambiguous (neither codename found) file means.
+
+def codename_present(content: str, codename: str) -> bool:
+    """Whether ``codename`` appears as a whole word anywhere in the file."""
+    return re.search(rf"\b{re.escape(codename)}\b", content) is not None
+
+
+def swap_codename(content: str, old: str, new: str) -> str:
+    """Replace every whole-word occurrence of ``old`` with ``new``. A no-op if
+    ``old`` isn't present (covers "already swapped" on a retry) — the caller
+    (``ConfigExecutor``) is responsible for distinguishing that from the
+    genuinely ambiguous case where neither codename appears at all."""
+    pattern = re.compile(rf"\b{re.escape(old)}\b")
+    if not pattern.search(content):
+        return content
+    return pattern.sub(new, content)

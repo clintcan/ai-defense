@@ -20,7 +20,8 @@ from datetime import UTC, datetime
 from ..registry.assets import AssetRegistry, ConnectionInfo
 from ..toolset.intents import ToolResult
 from ..toolset.registry import ToolCapability, ToolSpec
-from .catalog import action_primitive_kind
+from .catalog import AptSourcesCodenameSwap, action_primitive_kind
+from .config_exec import ConfigExecutor
 from .executor import SSHExecutor
 from .hardening import PrimitiveKind, RollbackAction
 
@@ -252,28 +253,86 @@ def make_mitigation_tool(
     )
 
 
+def _reboot_and_classify(
+    executor: SSHExecutor, conn: ConnectionInfo, key, asset_id: str, target: str | None,
+    rb_json: dict, resolved_command: str | None, upgrade_exit: int | None,
+) -> ToolResult:
+    """Shared final step for both distro paths: reboot into the upgraded system,
+    and classify the outcome carefully — the reboot severs the SSH session, so
+    "the command didn't return a clean 0" is normal, not failure:
+      * transport raised (connection dropped)        -> rebooting (success)
+      * exit code <= 0 (0 = clean; -1 = channel closed as the host went down;
+        paramiko's recv_exit_status returns -1, it does NOT raise)
+                                                       -> rebooting (success)
+      * applied=False (e.g. refused before running)  -> NOT issued (failure)
+      * POSITIVE exit with a live connection (e.g. sudo refused)
+                                                       -> NOT issued (failure)
+    On a genuine "not issued", return ok=False so the workflow halts with the
+    snapshot retained rather than claiming a host rebooted when it didn't."""
+    try:
+        rb = executor.run_template(conn.host, "os.reboot", {}, key=key,
+                                   user=conn.user, port=conn.port, dry_run_first=False)
+    except Exception:  # noqa: BLE001 - reboot severs the connection; that's success
+        rb = None
+    reboot_failed = None
+    if rb is not None:
+        if not rb.applied:
+            reboot_failed = f"reboot was refused before running ({rb.blocked_reason})"
+        elif rb.result is not None and rb.result.exit_code > 0:
+            reboot_failed = f"reboot command returned exit {rb.result.exit_code}"
+    if reboot_failed:
+        return ToolResult(
+            ok=False, tool=OS_UPGRADE_TOOL,
+            summary=(f"release upgrade applied on {asset_id} but {reboot_failed}; "
+                     "host NOT rebooted"),
+            data={"asset_id": asset_id, "target_version": target,
+                  "upgrade_exit": upgrade_exit, "reboot_issued": False, "rollback": rb_json},
+            resolved_command=resolved_command)
+    return ToolResult(
+        ok=True, tool=OS_UPGRADE_TOOL,
+        summary=(f"release upgrade applied on {asset_id}; reboot issued"
+                 + (f" (target {target})" if target else "")),
+        data={"asset_id": asset_id, "target_version": target,
+              "upgrade_exit": upgrade_exit, "reboot_issued": True, "rollback": rb_json},
+        resolved_command=resolved_command)
+
+
 def make_os_upgrade_tool(
-    executor: SSHExecutor, connection_resolver: ConnectionResolver,
+    executor: SSHExecutor, connection_resolver: ConnectionResolver, *,
+    config_executor: ConfigExecutor | None = None,
 ) -> ToolSpec:
     """Build the ``os.release_upgrade`` tool (capability=MUTATING).
 
-    The mutating core of the OS_UPGRADE workflow: drive an in-place Ubuntu release
+    The mutating core of the OS_UPGRADE workflow: drive an in-place release
     upgrade and reboot into it, as one approved action. Params: ``asset_id`` (conn
-    resolved from the registry), optional ``target_version`` (for the summary and
-    the workflow's post-reboot health check) and ``snapshot_id`` (the mandatory
-    pre-upgrade snapshot, recorded as the rollback — a dist-upgrade can't be undone
-    in place, so restoring the snapshot IS the rollback).
+    resolved from the registry), ``distro`` ("ubuntu" default, or "debian"),
+    optional ``target_version`` (for the summary and the workflow's post-reboot
+    health check) and ``snapshot_id`` (the mandatory pre-upgrade snapshot, recorded
+    as the rollback — a dist-upgrade can't be undone in place, so restoring the
+    snapshot IS the rollback). For Debian, ``old_codename``/``new_codename`` are
+    also required — these come from the reviewed release table via the workflow,
+    never from planner text (the MCP-facing ``os_upgrade`` tool never exposes them).
 
-    Sequence: ``do-release-upgrade -c`` (dry-run: is an upgrade available? changes
-    nothing) → ``do-release-upgrade`` → ``systemctl reboot``. The reboot drops the
-    SSH session; that is expected and counts as "reboot issued" — the workflow then
-    polls for the host to come back. Post-reboot reconnect/health/re-scan are
-    read-only and live in the workflow, not here."""
+    Ubuntu sequence: ``do-release-upgrade -c`` (dry-run: is an upgrade available?
+    changes nothing) → ``do-release-upgrade`` → ``systemctl reboot``.
+
+    Debian sequence (no single wrapper tool exists): a read-only check that no
+    third-party source under ``/etc/apt/sources.list.d/`` still names the old
+    codename (refuse rather than upgrade against inconsistent repos) → rewrite
+    ``/etc/apt/sources.list`` (old codename → new, backed up/diffed/restored on
+    failure, validated by ``apt-get update`` — needs ``config_executor``) →
+    ``apt-get full-upgrade`` (dry-run `--simulate` first) → ``systemctl reboot``.
+
+    Either way the reboot drops the SSH session; that is expected and counts as
+    "reboot issued" — the workflow then polls for the host to come back.
+    Post-reboot reconnect/health/re-scan are read-only and live in the workflow,
+    not here."""
 
     def _execute(params: dict, *, resolve_secret) -> ToolResult:
         asset_id = params["asset_id"]
         target = params.get("target_version")
         snapshot_id = params.get("snapshot_id")
+        distro = (params.get("distro") or "ubuntu").lower()
         conn = connection_resolver(asset_id)
         key = resolve_secret(conn.key_ref)
 
@@ -286,8 +345,77 @@ def make_os_upgrade_tool(
         rb_json = {"kind": rollback.kind.value, "description": rollback.description,
                    "payload": rollback.payload}
 
-        # 1. In-place release upgrade (dry-run `-c` first: is a new release available?).
-        #    Long timeout: the upgrade itself can run for many minutes.
+        if distro == "debian":
+            old_codename = params.get("old_codename")
+            new_codename = params.get("new_codename")
+            if not old_codename or not new_codename:
+                return ToolResult(
+                    ok=False, tool=OS_UPGRADE_TOOL,
+                    summary=f"missing codename info for the Debian upgrade on {asset_id}",
+                    data={"rollback": rb_json})
+            if config_executor is None:
+                return ToolResult(ok=False, tool=OS_UPGRADE_TOOL,
+                                  summary="Debian upgrades are not wired in this engine")
+            try:
+                swap = AptSourcesCodenameSwap(
+                    name="os.debian_sources_swap", path="/etc/apt/sources.list",
+                    old_codename=old_codename, new_codename=new_codename,
+                    validate=("sudo", "-n", "apt-get", "update"))
+            except ValueError as exc:
+                return ToolResult(ok=False, tool=OS_UPGRADE_TOOL,
+                                  summary=f"refusing unsafe codename value: {exc}")
+
+            # Read-only pre-check: a stale third-party source would leave the host
+            # on an inconsistent mix of releases after full-upgrade (fail safe on
+            # ambiguity rather than upgrade against it). Best-effort: this catches
+            # the common one-repo-per-line .list format, not the newer deb822
+            # .sources format.
+            grep_out, _ = executor.run_one(
+                conn.host, ["grep", "-rl", old_codename, "/etc/apt/sources.list.d/"],
+                key=key, user=conn.user, port=conn.port)
+            if grep_out is not None and grep_out.exit_code == 0 and grep_out.stdout.strip():
+                return ToolResult(
+                    ok=False, tool=OS_UPGRADE_TOOL,
+                    summary=(f"third-party apt sources under /etc/apt/sources.list.d/ still "
+                             f"reference '{old_codename}' on {asset_id}; update them first"),
+                    data={"asset_id": asset_id, "stale_sources": grep_out.stdout.strip(),
+                          "rollback": rb_json})
+
+            swap_out = config_executor.apply(swap, host=conn.host, key=key,
+                                             user=conn.user, port=conn.port)
+            if not swap_out.applied:
+                return ToolResult(
+                    ok=False, tool=OS_UPGRADE_TOOL,
+                    summary=f"sources.list rewrite failed on {asset_id}: {swap_out.blocked_reason}",
+                    data={"blocked_reason": swap_out.blocked_reason, "diff": swap_out.diff,
+                          "rollback": rb_json},
+                    resolved_command=swap_out.resolved_command)
+
+            up = executor.run_template(conn.host, "apt.full_upgrade", {}, key=key,
+                                       user=conn.user, port=conn.port, dry_run_first=True,
+                                       timeout=OS_UPGRADE_TIMEOUT_S)
+            if not up.applied:
+                return ToolResult(
+                    ok=False, tool=OS_UPGRADE_TOOL,
+                    summary=f"full-upgrade not applied on {asset_id}: {up.blocked_reason}",
+                    data={"blocked_reason": up.blocked_reason,
+                          "dry_run_exit": up.dry_run.exit_code if up.dry_run else None,
+                          "sources_diff": swap_out.diff, "rollback": rb_json},
+                    resolved_command=up.resolved_command)
+            res = up.result
+            if res is None or res.exit_code != 0:
+                code = res.exit_code if res else "?"
+                return ToolResult(
+                    ok=False, tool=OS_UPGRADE_TOOL,
+                    summary=f"full-upgrade command failed on {asset_id} (exit {code})",
+                    data={"exit_code": res.exit_code if res else None,
+                          "stderr": res.stderr if res else "", "rollback": rb_json},
+                    resolved_command=up.resolved_command)
+            return _reboot_and_classify(executor, conn, key, asset_id, target, rb_json,
+                                        up.resolved_command, res.exit_code)
+
+        # Ubuntu path (default). Dry-run `-c` first; long timeout since the real
+        # upgrade can run for many minutes.
         up = executor.run_template(conn.host, "os.do_release_upgrade", {}, key=key,
                                    user=conn.user, port=conn.port, dry_run_first=True,
                                    timeout=OS_UPGRADE_TIMEOUT_S)
@@ -308,48 +436,8 @@ def make_os_upgrade_tool(
                 data={"exit_code": res.exit_code if res else None,
                       "stderr": res.stderr if res else "", "rollback": rb_json},
                 resolved_command=up.resolved_command)
-
-        # 2. Reboot into the upgraded system. Classify the outcome carefully — the
-        #    reboot severs the SSH session, so "the command didn't return a clean 0"
-        #    is normal, not failure:
-        #      * transport raised (connection dropped)        -> rebooting (success)
-        #      * exit code <= 0 (0 = clean; -1 = channel closed as the host went
-        #        down; paramiko's recv_exit_status returns -1, it does NOT raise)
-        #                                                      -> rebooting (success)
-        #      * applied=False (e.g. refused before running)  -> NOT issued (failure)
-        #      * POSITIVE exit with a live connection (e.g. sudo refused)
-        #                                                      -> NOT issued (failure)
-        #    On a genuine "not issued", return ok=False so the workflow halts with the
-        #    snapshot retained rather than claiming a host rebooted when it didn't.
-        try:
-            rb = executor.run_template(conn.host, "os.reboot", {}, key=key,
-                                       user=conn.user, port=conn.port, dry_run_first=False)
-        except Exception:  # noqa: BLE001 - reboot severs the connection; that's success
-            rb = None
-        reboot_failed = None
-        if rb is not None:
-            if not rb.applied:
-                reboot_failed = f"reboot was refused before running ({rb.blocked_reason})"
-            elif rb.result is not None and rb.result.exit_code > 0:
-                reboot_failed = f"reboot command returned exit {rb.result.exit_code}"
-        if reboot_failed:
-            return ToolResult(
-                ok=False, tool=OS_UPGRADE_TOOL,
-                summary=(f"release upgrade applied on {asset_id} but {reboot_failed}; "
-                         "host NOT rebooted"),
-                data={"asset_id": asset_id, "target_version": target,
-                      "upgrade_exit": res.exit_code, "reboot_issued": False,
-                      "rollback": rb_json},
-                resolved_command=up.resolved_command)
-
-        return ToolResult(
-            ok=True, tool=OS_UPGRADE_TOOL,
-            summary=(f"release upgrade applied on {asset_id}; reboot issued"
-                     + (f" (target {target})" if target else "")),
-            data={"asset_id": asset_id, "target_version": target,
-                  "upgrade_exit": res.exit_code, "reboot_issued": True,
-                  "rollback": rb_json},
-            resolved_command=up.resolved_command)
+        return _reboot_and_classify(executor, conn, key, asset_id, target, rb_json,
+                                    up.resolved_command, res.exit_code)
 
     return ToolSpec(
         name=OS_UPGRADE_TOOL,
@@ -360,6 +448,9 @@ def make_os_upgrade_tool(
                 "asset_id": {"type": "string"},
                 "target_version": {"type": "string"},
                 "snapshot_id": {"type": "string"},
+                "distro": {"type": "string"},
+                "old_codename": {"type": "string"},
+                "new_codename": {"type": "string"},
             },
         },
         executor=_execute,

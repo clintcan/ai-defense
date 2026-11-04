@@ -386,8 +386,8 @@ class Engine:
             tool=BACKUP_DIFF_TOOL, params=params, targets=[asset_id],
             action_class=ActionClass.DISCOVERY,
             reason=f"preview restore of {path} on {asset_id} from its backup"))
-        if not preview.ok:
-            return preview, preview
+        if not preview.ok or preview.data.get("identical"):
+            return preview, preview                 # refused, or nothing to restore
         restore = self.dispatcher.dispatch(Intent(
             tool=RESTORE_BACKUP_TOOL, params=params, targets=[asset_id],
             action_class=ActionClass.MITIGATE_CANARY,

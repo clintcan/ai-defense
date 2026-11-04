@@ -127,6 +127,10 @@ def test_mcp_restore_previews_then_waits_for_approval_then_applies():
     assert done["ok"] and fs.files[SRC] == BUSTER
     assert done["data"]["rollback"]["payload"]["saved_copy"] == SRC + ".ai-defense.pre-restore"
 
+    # once it matches, a re-call is just the read-only preview: no new change set
+    again = handle_call(eng, "restore_config_backup", {"asset_id": "deb-h", "path": SRC})
+    assert again["ok"] and again["data"]["identical"] and "change_set_id" not in again
+
 
 def test_mcp_restore_refuses_a_non_allowlisted_path_before_any_approval():
     fs = _FS({"/etc/shadow": "x", "/etc/shadow.ai-defense.bak": "y"})

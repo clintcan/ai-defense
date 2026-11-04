@@ -75,6 +75,21 @@ def edit_path_allowed(path: str) -> bool:
     return path in ALLOWED_EDIT_PATHS
 
 
+# Every in-place edit keeps the pre-edit file here (overwritten by each new edit,
+# so it always holds the state before the most recent one).
+BACKUP_SUFFIX = ".ai-defense.bak"
+# Where a restore keeps the content it replaced, so the restore is itself undoable.
+PRE_RESTORE_SUFFIX = ".ai-defense.pre-restore"
+
+# (validate, reload) run after restoring an allowlisted file from its backup; a
+# path absent here is restored unvalidated. sources.list has none on purpose:
+# `apt-get update` needs live repos, which a retired release's file won't have.
+RESTORE_CHECKS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "/etc/ssh/sshd_config": (("sudo", "-n", "sshd", "-t"),
+                             ("sudo", "-n", "systemctl", "reload", "sshd")),
+}
+
+
 @dataclass(frozen=True)
 class ConfigBlockWrite:
     name: str

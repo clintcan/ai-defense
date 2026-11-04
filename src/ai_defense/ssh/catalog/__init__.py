@@ -20,7 +20,10 @@ from ._template import CommandTemplate, render_argv
 from .configs import (
     ALLOWED_DROPIN_DIRS,
     ALLOWED_EDIT_PATHS,
+    BACKUP_SUFFIX,
     CONFIG_ACTIONS,
+    PRE_RESTORE_SUFFIX,
+    RESTORE_CHECKS,
     AptSourcesCodenameSwap,
     ConfigBlockRemove,
     ConfigBlockWrite,
@@ -85,6 +88,7 @@ __all__ = ["CATALOG", "CommandTemplate", "render_argv",
            "DropInWrite", "DropInRemove", "dir_allowed",
            "ALLOWED_DROPIN_DIRS", "ConfigBlockWrite", "ConfigBlockRemove",
            "edit_path_allowed", "ALLOWED_EDIT_PATHS", "AptSourcesCodenameSwap",
+           "BACKUP_SUFFIX", "PRE_RESTORE_SUFFIX", "RESTORE_CHECKS",
            "MODULE_ACTIONS", "ModuleBlacklist", "ModuleUnblacklist",
            "SERVICE_ACTIONS", "ServiceStateChange",
            "FIREWALL_ACTIONS", "FirewallRule"]

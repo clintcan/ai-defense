@@ -63,8 +63,12 @@ from .ssh.catalog import (
 from .ssh.config_exec import ConfigExecutor
 from .ssh.executor import SSHExecutor
 from .ssh.tools import (
+    BACKUP_DIFF_TOOL,
+    RESTORE_BACKUP_TOOL,
+    make_backup_diff_tool,
     make_mitigation_tool,
     make_os_upgrade_tool,
+    make_restore_backup_tool,
     make_security_update_tool,
     registry_connection_resolver,
 )
@@ -372,6 +376,24 @@ class Engine:
         change_set_id until approved; re-call to apply."""
         return self._mitigation_dispatch(asset_id, cve_id, reverse=True)
 
+    def restore_config_backup(self, asset_id: str, path: str) -> tuple[ToolResult, ToolResult]:
+        """Restore an allowlisted file from the backup its last in-place edit
+        left. Returns ``(preview, restore)``: a read-only diff of what would
+        change, then the approval-gated restore itself (MITIGATE_CANARY, like
+        reverting a mitigation) — pending until approved; re-call to apply."""
+        params = {"asset_id": asset_id, "path": path}
+        preview = self.dispatcher.dispatch(Intent(
+            tool=BACKUP_DIFF_TOOL, params=params, targets=[asset_id],
+            action_class=ActionClass.DISCOVERY,
+            reason=f"preview restore of {path} on {asset_id} from its backup"))
+        if not preview.ok:
+            return preview, preview
+        restore = self.dispatcher.dispatch(Intent(
+            tool=RESTORE_BACKUP_TOOL, params=params, targets=[asset_id],
+            action_class=ActionClass.MITIGATE_CANARY,
+            reason=f"restore {path} on {asset_id} from its pre-edit backup"))
+        return preview, restore
+
     def _mitigation_dispatch(self, asset_id: str, cve_id: str, *, reverse: bool) -> ToolResult:
         m = self.mitigations.for_cve(cve_id)
         if m is None:
@@ -575,6 +597,8 @@ def build_engine(
                                         config_actions=PRIMITIVE_ACTIONS))
     tools.register(make_os_upgrade_tool(ssh_executor, conn_resolver,
                                         config_executor=config_executor))
+    tools.register(make_backup_diff_tool(conn_resolver, config_executor))
+    tools.register(make_restore_backup_tool(conn_resolver, config_executor))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))

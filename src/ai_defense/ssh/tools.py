@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from ..registry.assets import AssetRegistry, ConnectionInfo
 from ..toolset.intents import ToolResult
 from ..toolset.registry import ToolCapability, ToolSpec
-from .catalog import AptSourcesCodenameSwap, action_primitive_kind
+from .catalog import PRE_RESTORE_SUFFIX, AptSourcesCodenameSwap, action_primitive_kind
 from .config_exec import ConfigExecutor
 from .executor import SSHExecutor
 from .hardening import PrimitiveKind, RollbackAction
@@ -28,6 +28,8 @@ from .hardening import PrimitiveKind, RollbackAction
 SECURITY_UPDATE_TOOL = "patch.apply_security_update"
 MITIGATION_TOOL = "mitigation.apply_hardening"
 OS_UPGRADE_TOOL = "os.release_upgrade"
+BACKUP_DIFF_TOOL = "config.backup_diff"
+RESTORE_BACKUP_TOOL = "config.restore_backup"
 
 # do-release-upgrade runs far longer than the default 60s command timeout.
 OS_UPGRADE_TIMEOUT_S = 3600
@@ -251,6 +253,82 @@ def make_mitigation_tool(
         executor=_execute,
         capability=ToolCapability.MUTATING,
     )
+
+
+_RESTORE_SCHEMA = {
+    "type": "object",
+    "required": ["asset_id", "path"],
+    "properties": {"asset_id": {"type": "string"}, "path": {"type": "string"}},
+}
+
+
+def make_backup_diff_tool(connection_resolver: ConnectionResolver,
+                          config_executor: ConfigExecutor) -> ToolSpec:
+    """``config.backup_diff`` (READ_ONLY): what restoring an allowlisted file from
+    its in-place-edit backup would change. Lets the approver see the diff before
+    approving ``config.restore_backup``."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        asset_id, path = params["asset_id"], params["path"]
+        conn = connection_resolver(asset_id)
+        out = config_executor.backup_diff(path, host=conn.host, key=resolve_secret(conn.key_ref),
+                                          user=conn.user, port=conn.port)
+        if not out.applied:
+            return ToolResult(ok=False, tool=BACKUP_DIFF_TOOL,
+                              summary=f"cannot preview restore of {path} on {asset_id}: "
+                                      f"{out.blocked_reason}",
+                              data={"asset_id": asset_id, "path": path,
+                                    "blocked_reason": out.blocked_reason},
+                              resolved_command=out.resolved_command)
+        same = out.diff == ""
+        return ToolResult(ok=True, tool=BACKUP_DIFF_TOOL,
+                          summary=(f"{path} on {asset_id} already matches its backup" if same
+                                   else f"restoring {path} on {asset_id} would apply this diff"),
+                          data={"asset_id": asset_id, "path": path, "diff": out.diff,
+                                "identical": same},
+                          resolved_command=out.resolved_command)
+
+    return ToolSpec(name=BACKUP_DIFF_TOOL, schema=_RESTORE_SCHEMA, executor=_execute,
+                    capability=ToolCapability.READ_ONLY)
+
+
+def make_restore_backup_tool(connection_resolver: ConnectionResolver,
+                             config_executor: ConfigExecutor) -> ToolSpec:
+    """``config.restore_backup`` (MUTATING): put an allowlisted file back to the
+    backup its last in-place edit left (``<path>.ai-defense.bak``). The path must
+    be on ALLOWED_EDIT_PATHS; the replaced content is saved first, and put back if
+    the path's validator (e.g. ``sshd -t``) rejects the restored file."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        asset_id, path = params["asset_id"], params["path"]
+        conn = connection_resolver(asset_id)
+        out = config_executor.restore_backup(path, host=conn.host,
+                                             key=resolve_secret(conn.key_ref),
+                                             user=conn.user, port=conn.port)
+        res = out.result
+        base = {"asset_id": asset_id, "path": path, "diff": out.diff,
+                "stdout": res.stdout if res else "", "stderr": res.stderr if res else ""}
+        if not out.applied:
+            return ToolResult(ok=False, tool=RESTORE_BACKUP_TOOL,
+                              summary=f"{path} not restored on {asset_id}: {out.blocked_reason}",
+                              data={**base, "blocked_reason": out.blocked_reason},
+                              resolved_command=out.resolved_command)
+        pre = path + PRE_RESTORE_SUFFIX
+        rollback = RollbackAction(
+            kind=PrimitiveKind.CONFIG_EDIT,
+            description=f"the replaced {path} is kept at {pre} on {asset_id}",
+            payload={"asset_id": asset_id, "path": path, "saved_copy": pre})
+        return ToolResult(
+            ok=True, tool=RESTORE_BACKUP_TOOL,
+            summary=(f"{path} on {asset_id} already matched its backup; nothing changed"
+                     if out.diff == "" else f"{path} restored from backup on {asset_id}"),
+            data={**base, "rollback": {"kind": rollback.kind.value,
+                                       "description": rollback.description,
+                                       "payload": rollback.payload}},
+            resolved_command=out.resolved_command)
+
+    return ToolSpec(name=RESTORE_BACKUP_TOOL, schema=_RESTORE_SCHEMA, executor=_execute,
+                    capability=ToolCapability.MUTATING)
 
 
 def _reboot_and_classify(

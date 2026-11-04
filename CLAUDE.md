@@ -255,7 +255,13 @@ record — and internal error text is never surfaced to the planner.
   `session.upload_progress` — the safe, non-app-breaking fix for the LFI→RCE
   session vector). Use it where the vendor patch can't be
   installed (an EOL OS without ESM); an uncatalogued CVE escalates to a human
-  instead. Backing a mitigation out — once the vendor patch lands, or to undo a
+  instead. An in-place edit's backup (`<path>.ai-defense.bak`, holding the file as
+  it was before the **most recent** edit) can be put back with the approval-gated
+  **`restore_config_backup`** tool: a read-only `config.backup_diff` preview is
+  shown first, then `config.restore_backup` (MUTATING, `mitigate_canary`) restores
+  it — allowlisted paths only, the replaced content kept at
+  `<path>.ai-defense.pre-restore`, re-validated where a checker exists
+  (`sshd -t` + reload; `RESTORE_CHECKS`) and put back if that fails. Backing a mitigation out — once the vendor patch lands, or to undo a
   workaround — is the separate approval-gated **`revert_mitigation`** tool, which
   runs the mitigation's *recorded rollback action*; it is its own MUTATING change,
   so approving the apply never silently also authorizes the revert.

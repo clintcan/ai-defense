@@ -25,6 +25,9 @@ from __future__ import annotations
 import difflib
 
 from .catalog import (
+    BACKUP_SUFFIX,
+    PRE_RESTORE_SUFFIX,
+    RESTORE_CHECKS,
     AptSourcesCodenameSwap,
     ConfigBlockRemove,
     ConfigBlockWrite,
@@ -168,7 +171,7 @@ class ConfigExecutor:
 
     def _write_validated(self, a, new_content, *, label, diff,
                          host, key, user, port) -> ExecOutcome:
-        bak = a.path + ".ai-defense.bak"
+        bak = a.path + BACKUP_SUFFIX
 
         def _run(argv, **kw):
             return self._ex.run_one(host, argv, key=key, user=user, port=port, **kw)
@@ -195,6 +198,85 @@ class ConfigExecutor:
         if a.reload:
             _run(list(a.reload))
         return ExecOutcome(applied=True, resolved_command=label, result=w_out, diff=diff)
+
+    # -- restore an allowlisted file from its BACKUP_SUFFIX copy ---------
+
+    def _read_with_backup(self, path, *, host, key, user, port):
+        """(current, backup, refusal) — refusal is set if either can't be read."""
+        def cat(p):
+            return self._ex.run_one(host, ["sudo", "-n", "cat", p], key=key, user=user, port=port)
+        out, reason = cat(path)
+        if out is None or out.exit_code != 0:
+            return None, None, reason or f"could not read {path} (exit {out.exit_code})"
+        bout, breason = cat(path + BACKUP_SUFFIX)
+        if bout is None or bout.exit_code != 0:
+            return out.stdout, None, (breason or f"no backup at {path}{BACKUP_SUFFIX} "
+                                                f"(exit {bout.exit_code})")
+        return out.stdout, bout.stdout, None
+
+    @staticmethod
+    def _restore_diff(path, current, backup) -> str:
+        return "".join(difflib.unified_diff(
+            current.splitlines(keepends=True), backup.splitlines(keepends=True),
+            fromfile=path, tofile=f"{path} (restored from {path}{BACKUP_SUFFIX})"))
+
+    def backup_diff(self, path: str, *, host: str, key: str,
+                    user: str = "root", port: int = 22) -> ExecOutcome:
+        """Read-only: the diff a restore of ``path`` would make. Changes nothing."""
+        label = f"diff {path} against {path}{BACKUP_SUFFIX}"
+        if not edit_path_allowed(path):
+            return ExecOutcome(applied=False, resolved_command=label,
+                               blocked_reason=f"path not in the allowlisted edit set: {path}")
+        current, backup, why = self._read_with_backup(path, host=host, key=key,
+                                                      user=user, port=port)
+        if why:
+            return ExecOutcome(applied=False, resolved_command=label, blocked_reason=why)
+        return ExecOutcome(applied=True, resolved_command=label,
+                           diff=self._restore_diff(path, current, backup))
+
+    def restore_backup(self, path: str, *, host: str, key: str,
+                       user: str = "root", port: int = 22) -> ExecOutcome:
+        """Put ``path`` back to its BACKUP_SUFFIX copy. The replaced content is
+        kept at PRE_RESTORE_SUFFIX first, and is put back if the path's
+        RESTORE_CHECKS validator rejects the restored file."""
+        label = f"restore {path} from {path}{BACKUP_SUFFIX}"
+        if not edit_path_allowed(path):
+            return ExecOutcome(applied=False, resolved_command=label,
+                               blocked_reason=f"path not in the allowlisted edit set: {path}")
+        current, backup, why = self._read_with_backup(path, host=host, key=key,
+                                                      user=user, port=port)
+        if why:
+            return ExecOutcome(applied=False, resolved_command=label, blocked_reason=why)
+        if backup == current:
+            return ExecOutcome(applied=True, resolved_command=label, diff="")   # idempotent
+        diff = self._restore_diff(path, current, backup)
+
+        def _run(argv):
+            return self._ex.run_one(host, argv, key=key, user=user, port=port)
+
+        pre = path + PRE_RESTORE_SUFFIX
+        p_out, p_reason = _run(["sudo", "-n", "cp", path, pre])
+        if p_out is None or p_out.exit_code != 0:
+            why = p_reason or f"could not save current file (exit {p_out.exit_code})"
+            return ExecOutcome(applied=False, resolved_command=label, diff=diff,
+                               blocked_reason=f"{why}; nothing changed")
+        c_out, c_reason = _run(["sudo", "-n", "cp", path + BACKUP_SUFFIX, path])
+        if c_out is None or c_out.exit_code != 0:
+            _run(["sudo", "-n", "cp", pre, path])
+            why = c_reason or f"copy failed (exit {c_out.exit_code})"
+            return ExecOutcome(applied=False, resolved_command=label, diff=diff,
+                               blocked_reason=f"{why}; original put back")
+        validate, reload = RESTORE_CHECKS.get(path, ((), ()))
+        if validate:
+            v_out, v_reason = _run(list(validate))
+            if v_out is None or v_out.exit_code != 0:
+                _run(["sudo", "-n", "cp", pre, path])
+                why = v_reason or f"validation failed (exit {v_out.exit_code})"
+                return ExecOutcome(applied=False, resolved_command=label, diff=diff,
+                                   result=v_out, blocked_reason=f"{why}; original put back")
+        if reload:
+            _run(list(reload))
+        return ExecOutcome(applied=True, resolved_command=label, result=c_out, diff=diff)
 
     # -- kernel modules ---------------------------------------------------
 

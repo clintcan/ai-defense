@@ -182,6 +182,24 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "restore_config_backup",
+        "description": "Restore an allowlisted config file (sshd_config, sysctl.conf, "
+                       "login.defs, apt sources.list) on a host from the backup its last "
+                       "in-place edit left (<path>.ai-defense.bak). Always returns a "
+                       "read-only `preview_diff` of what would change. The restore itself "
+                       "is MUTATING and approval-gated: returns a pending change_set_id "
+                       "until a human approves, then call again to apply. The replaced "
+                       "content is kept at <path>.ai-defense.pre-restore.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["asset_id", "path"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "path": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "revert_mitigation",
         "description": "Undo a previously applied mitigation by running its recorded "
                        "rollback action (restore the pkexec setuid bit, remove the "
@@ -394,6 +412,16 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                 out["next"] = "ask the operator to approve, then call revert_mitigation again"
             return out
 
+        if name == "restore_config_backup":
+            preview, res = engine.restore_config_backup(args["asset_id"], args["path"])
+            out = _tool_result_json(res)
+            out["preview_diff"] = preview.data.get("diff") if preview.ok else None
+            if res.data.get("approval_state") == "pending":
+                out["change_set_id"] = res.data.get("change_set_id")
+                out["next"] = ("show the operator preview_diff, ask them to approve, then "
+                               "call restore_config_backup again")
+            return out
+
         if name == "os_upgrade":
             r = engine.os_upgrade(args["asset_id"], canary=args.get("canary", True))
             out: dict[str, Any] = {
@@ -586,6 +614,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def revert_mitigation(asset_id: str, cve: str) -> dict:
         return handle_call(engine, "revert_mitigation", {"asset_id": asset_id, "cve": cve})
 
+    def restore_config_backup(asset_id: str, path: str) -> dict:
+        return handle_call(engine, "restore_config_backup", {"asset_id": asset_id, "path": path})
+
     def os_upgrade(asset_id: str, canary: bool = True) -> dict:
         return handle_call(engine, "os_upgrade", {"asset_id": asset_id, "canary": canary})
 
@@ -611,7 +642,8 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate, mitigate,
-               revert_mitigation, os_upgrade, list_mitigations, approve_change, audit_tail,
+               revert_mitigation, restore_config_backup, os_upgrade, list_mitigations,
+               approve_change, audit_tail,
                onboard_cloud_account, update_asset, cloud_regions, cloud_discover,
                cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])

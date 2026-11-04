@@ -1,0 +1,26 @@
+# Same LFI->RCE hardening as php-session-upload-progress.yaml (disable PHP's
+# session.upload_progress), for a Bitnami LAMP host instead of Ubuntu-packaged
+# PHP-FPM: PHP is bundled under /opt/bitnami/php (Apache mod_php, no php-fpm), so
+# it needs its own path and its own Bitnami ctlscript.sh service control. Kept
+# under a DISTINCT hardening id from the FPM variant deliberately — the registry
+# maps one id per CVE/key, so if both used the same key one would silently shadow
+# the other; naming them separately lets you choose the right one per host.
+# Run it with:  mitigate <host> PHP-SESSION-UPLOAD-PROGRESS-BITNAMI
+#               revert_mitigation <host> PHP-SESSION-UPLOAD-PROGRESS-BITNAMI
+#
+# Both actions are allowlisted config actions in the reviewed catalog
+# (ssh/catalog/configs.py); a file may reference one but can't define a new one.
+# Bitnami-only: on a host without /opt/bitnami the write or `php -v` validation
+# fails and nothing is applied — use the plain (FPM) variant for a distro-packaged
+# host instead.
+- id: php-disable-session-upload-progress-bitnami
+  cves: [PHP-SESSION-UPLOAD-PROGRESS-BITNAMI]
+  title: Disable PHP session.upload_progress on Bitnami LAMP (LFI->RCE hardening)
+  source_ref: https://www.php.net/manual/en/session.configuration.php#ini.session.upload-progress.enabled
+  template: config.php_disable_upload_progress_bitnami
+  rollback_template: config.php_disable_upload_progress_bitnami.remove
+  description: >-
+    write session.upload_progress.enabled=Off to a Bitnami PHP conf.d drop-in,
+    smoke-check with `php -v`, then restart Apache via /opt/bitnami/ctlscript.sh;
+    reverse removes the drop-in and restarts Apache. Safe hardening — it does not
+    alter application behaviour.

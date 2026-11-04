@@ -251,6 +251,46 @@ def test_php_upload_progress_dropin_writes_safe_setting_and_validates():
     assert any(a[:5] == ("sudo", "-n", "systemctl", "reload", "php8.1-fpm") for a in argvs)
 
 
+def test_php_upload_progress_bitnami_dropin_writes_and_restarts_via_ctlscript():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        CONFIG_ACTIONS["config.php_disable_upload_progress_bitnami"],
+        host="h", key="k", user="bitnami")
+    assert out.applied
+    tee = next(c for c in tp.calls if c[0][:3] == ("sudo", "-n", "tee"))
+    assert tee[0][3] == "/opt/bitnami/php/etc/conf.d/99-ai-defense-hardening.ini"
+    assert "session.upload_progress.enabled = Off" in tee[1]
+    argvs = _argvs(tp)
+    assert any(a[:3] == ("sudo", "-n", "/opt/bitnami/php/bin/php") for a in argvs)
+    assert any(a[:4] == ("sudo", "-n", "/opt/bitnami/ctlscript.sh", "restart")
+              for a in argvs)
+
+
+def test_php_upload_progress_bitnami_reverse_removes_dropin():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        CONFIG_ACTIONS["config.php_disable_upload_progress_bitnami.remove"],
+        host="h", key="k")
+    assert out.applied
+    assert any(a[:4] == ("sudo", "-n", "rm", "-f") for a in _argvs(tp))
+
+
+def test_engine_mitigate_and_revert_php_bitnami():
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    eng.registry.register(_host("hpb"))
+    cve = "PHP-SESSION-UPLOAD-PROGRESS-BITNAMI"
+    p = eng.mitigate("hpb", cve)
+    assert p.data["approval_state"] == "pending"
+    eng.approve(p.data["change_set_id"])
+    done = handle_call(eng, "mitigate", {"asset_id": "hpb", "cve": cve})
+    assert done["ok"] is True
+    r = eng.revert_mitigation("hpb", cve)
+    assert r.data["approval_state"] == "pending"
+    eng.approve(r.data["change_set_id"])
+    reverted = handle_call(eng, "revert_mitigation", {"asset_id": "hpb", "cve": cve})
+    assert reverted["ok"] is True and reverted["data"]["reverse"] is True
+
+
 def test_engine_mitigate_and_revert_php_upload_progress():
     eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
     eng.registry.register(_host("hp"))

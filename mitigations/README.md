@@ -50,7 +50,8 @@ mapping with a top-level `mitigations:` list. Fields:
 | `mptcp.yaml` | Disable Multipath TCP persistently | config drop-in `config.sysctl_mptcp_off` |
 | `sshd-x11.yaml` | sshd: disable X11 forwarding (no conf.d) | in-place block edit `config.sshd_disable_x11` |
 | `http2-rapid-reset.yaml` | CVE-2023-44487 (HTTP/2 Rapid Reset): cap nginx concurrent streams | config drop-in `config.nginx_http2_rapidreset` |
-| `php-session-upload-progress.yaml` | Disable PHP `session.upload_progress` (LFI→RCE hardening) | config drop-in `config.php_disable_upload_progress` |
+| `php-session-upload-progress.yaml` | Disable PHP `session.upload_progress` on Ubuntu-packaged PHP-FPM (LFI→RCE hardening) | config drop-in `config.php_disable_upload_progress` |
+| `php-session-upload-progress-bitnami.yaml` | Same, for Bitnami LAMP (bundled PHP, Apache mod_php) | config drop-in `config.php_disable_upload_progress_bitnami` |
 | `kernel-module-dccp.yaml` | CVE-2017-6074 (DCCP use-after-free LPE): blacklist the `dccp` module | kernel-module `module.blacklist_dccp` |
 | `service-rpcbind.yaml` | CVE-2017-8779 (rpcbomb DoS): disable `rpcbind` where unneeded | service `service.disable_rpcbind` |
 | `firewall-memcached.yaml` | CVE-2018-1000115 (memcached UDP amplification): block UDP 11211 | firewall `firewall.deny_udp_memcached` |

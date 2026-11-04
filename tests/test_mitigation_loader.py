@@ -96,6 +96,8 @@ def test_shipped_mitigations_folder_is_valid():
     assert reg.for_cve("CVE-2023-44487").mitigation_id == "http2-rapid-reset-nginx"
     assert reg.for_cve("PHP-SESSION-UPLOAD-PROGRESS").mitigation_id == \
         "php-disable-session-upload-progress"
+    assert reg.for_cve("PHP-SESSION-UPLOAD-PROGRESS-BITNAMI").mitigation_id == \
+        "php-disable-session-upload-progress-bitnami"   # distinct key, no collision
     assert reg.for_cve("CVE-2017-6074").mitigation_id == "disable-dccp-module"   # kernel module
     assert reg.for_cve("CVE-2017-8779").mitigation_id == "disable-rpcbind"       # service
     assert reg.for_cve("CVE-2018-1000115").mitigation_id == "firewall-deny-memcached-udp"

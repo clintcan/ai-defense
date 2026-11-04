@@ -24,6 +24,7 @@ ALLOWED_DROPIN_DIRS: tuple[str, ...] = (
     "/etc/security/limits.d/",
     "/etc/nginx/conf.d/",       # included inside nginx's http{} block
     "/etc/php/8.1/fpm/conf.d/", # Ubuntu-packaged PHP-FPM (22.04's default 8.1)
+    "/opt/bitnami/php/etc/conf.d/",  # Bitnami LAMP's bundled PHP (not the distro package)
 )
 
 
@@ -89,6 +90,7 @@ _MPTCP_PATH = "/etc/sysctl.d/80-ai-defense-mptcp.conf"
 _SSHD = "/etc/ssh/sshd_config"
 _NGINX_HTTP2_PATH = "/etc/nginx/conf.d/99-ai-defense-http2.conf"
 _PHP_FPM_HARDEN_PATH = "/etc/php/8.1/fpm/conf.d/99-ai-defense-hardening.ini"
+_PHP_BITNAMI_HARDEN_PATH = "/opt/bitnami/php/etc/conf.d/99-ai-defense-hardening.ini"
 
 # Allowlisted config actions, keyed by name. A mitigation's template /
 # rollback_template may reference one of these (apply / reverse).
@@ -155,6 +157,26 @@ CONFIG_ACTIONS: dict[str, DropInWrite | DropInRemove] = {
         name="config.php_disable_upload_progress.remove",
         path=_PHP_FPM_HARDEN_PATH,
         reload=("sudo", "-n", "systemctl", "reload", "php8.1-fpm"),
+    ),
+    # Same hardening for Bitnami LAMP: PHP is bundled under /opt/bitnami, not the
+    # distro package, and runs as Apache mod_php (no php-fpm). Apache's mod_php and
+    # the bundled `php` CLI share the same conf.d scan dir, so `php -v` is a
+    # best-effort smoke check before Apache is restarted via Bitnami's own
+    # ctlscript.sh — it catches gross corruption (a broken PHP load), not a strict
+    # ini syntax validator the way `nginx -t`/`sshd -t` are. The written content is
+    # a single fixed, reviewed directive, so that residual risk is minimal.
+    "config.php_disable_upload_progress_bitnami": DropInWrite(
+        name="config.php_disable_upload_progress_bitnami",
+        path=_PHP_BITNAMI_HARDEN_PATH,
+        content="; AI Defense: close the session-upload-progress LFI->RCE vector\n"
+                "session.upload_progress.enabled = Off\n",
+        validate=("sudo", "-n", "/opt/bitnami/php/bin/php", "-v"),
+        reload=("sudo", "-n", "/opt/bitnami/ctlscript.sh", "restart", "apache"),
+    ),
+    "config.php_disable_upload_progress_bitnami.remove": DropInRemove(
+        name="config.php_disable_upload_progress_bitnami.remove",
+        path=_PHP_BITNAMI_HARDEN_PATH,
+        reload=("sudo", "-n", "/opt/bitnami/ctlscript.sh", "restart", "apache"),
     ),
 }
 

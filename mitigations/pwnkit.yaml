@@ -3,7 +3,7 @@
 # a mapping with a top-level `mitigations:` list.
 #
 # Every `template`/`rollback_template` must already be allowlisted in the
-# reviewed catalog (src/ai_defense/ssh/catalog.py) — a file can map a CVE to an
+# reviewed catalog (src/ai_defense/ssh/catalog/) — a file can map a CVE to an
 # existing reviewed command, but can never introduce a new one.
 
 - id: pwnkit-pkexec-suid

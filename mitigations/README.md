@@ -18,7 +18,7 @@ editing code).
 ## The one hard rule
 
 A mitigation file maps a CVE to a command that is **already allowlisted** in the
-reviewed catalog (`src/ai_defense/ssh/catalog.py`). It can **not** introduce a
+reviewed catalog (`src/ai_defense/ssh/catalog/`). It can **not** introduce a
 new command. The loader **rejects** (skips, with a warning) any entry whose
 `template`/`rollback_template` isn't in the catalog. This keeps the "no free-form
 remote execution / default-deny on new commands" guarantee (CLAUDE.md #3/#5):

@@ -3,7 +3,7 @@
 # depth, not a single-CVE fix, so it's keyed under a plain hardening id (not a
 # CVE) — run it with:  mitigate <host> MPTCP
 #
-# Both commands are allowlisted in the reviewed catalog (ssh/catalog.py).
+# Both commands are allowlisted in the reviewed catalog (ssh/catalog/).
 - id: mptcp-disable
   cves: [MPTCP]
   title: Disable Multipath TCP (net.mptcp.enabled=0)

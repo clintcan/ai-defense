@@ -2,7 +2,7 @@
 patch can't be (an EOL OS without ESM, or a fix not yet shipped).
 
 A mitigation is **data, not a command**: an entry names which *allowlisted*
-catalog command (``ssh/catalog.py``) applies the workaround and which reverses
+catalog command (``ssh/catalog/``) applies the workaround and which reverses
 it, plus the CVE(s) it covers and the advisory it cites (hard rule #6). The
 engine never invents a mitigation; it only offers one listed here.
 

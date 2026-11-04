@@ -3,7 +3,7 @@
 # ACKs. Where the kernel can't be patched, the official mitigation is to disable
 # TCP SACK. One entry covers all three CVEs.
 #
-# Both commands are allowlisted in the reviewed catalog (ssh/catalog.py).
+# Both commands are allowlisted in the reviewed catalog (ssh/catalog/).
 - id: sack-panic-disable-tcp-sack
   cves: [CVE-2019-11477, CVE-2019-11478, CVE-2019-11479]
   title: "SACK Panic: disable TCP Selective ACK (net.ipv4.tcp_sack=0)"

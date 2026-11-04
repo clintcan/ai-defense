@@ -144,19 +144,25 @@ _MITIGATIONS: dict[str, _MitigationCommand] = {
 
 def make_mitigation_tool(
     executor: SSHExecutor, connection_resolver: ConnectionResolver,
+    mitigations: dict[str, _MitigationCommand] | None = None,
 ) -> ToolSpec:
     """Build the ``mitigation.apply_hardening`` tool (capability=MUTATING).
 
     Params: ``asset_id`` (connection resolved from the registry) and
-    ``mitigation_id`` (must be in the allowlisted ``_MITIGATIONS`` map). Runs the
+    ``mitigation_id`` (must be in the allowlisted ``mitigations`` map). Runs the
     mapped, reversible catalog command (dry-run first) and records a rollback
     action that restores the prior state. The planner never supplies a command —
-    only a mitigation id the toolset maps to a reviewed template."""
+    only a mitigation id the toolset maps to a reviewed template.
+
+    ``mitigations`` is the id -> command map (built by the composition root from
+    the loaded mitigation registry); it defaults to the built-ins so the tool is
+    usable without a configured folder."""
+    catalogue = mitigations if mitigations is not None else _MITIGATIONS
 
     def _execute(params: dict, *, resolve_secret) -> ToolResult:
         asset_id = params["asset_id"]
         mitigation_id = params["mitigation_id"]
-        mc = _MITIGATIONS.get(mitigation_id)
+        mc = catalogue.get(mitigation_id)
         if mc is None:
             return ToolResult(
                 ok=False, tool=MITIGATION_TOOL,

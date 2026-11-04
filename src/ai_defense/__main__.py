@@ -34,13 +34,18 @@ def _add_engine_args(p: argparse.ArgumentParser) -> None:
                    help="OSV ecosystem for queries (default: Debian; auto-detected per host)")
     p.add_argument("--kev", action="store_true",
                    help="mark CISA KEV (known-exploited) advisories -> top priority")
+    p.add_argument("--mitigations-dir", default=None,
+                   help="folder of CVE mitigation files (yaml/json, one or many per file) "
+                        "to load alongside the built-ins; each entry must reference an "
+                        "allowlisted catalog command")
 
 
 def _engine_from_args(args):
     from .mcp_server import _engine_for
     return _engine_for(None, args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
                        allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
-                       osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev)
+                       osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev,
+                       mitigations_dir=args.mitigations_dir)
 
 
 def _fleet_asset_ids(engine) -> list[str]:
@@ -68,7 +73,8 @@ def _run_mcp(args) -> int:
     from .mcp_server import serve
     serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
           allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
-          osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev)
+          osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev,
+          mitigations_dir=args.mitigations_dir)
     return 0
 
 

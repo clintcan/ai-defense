@@ -48,6 +48,7 @@ from .registry.assets import Asset, AssetRegistry, Authorization
 from .report import ReportProvenance, build_report, write_report
 from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
+from .ssh.catalog import CATALOG
 from .ssh.executor import SSHExecutor
 from .ssh.tools import (
     make_mitigation_tool,
@@ -62,6 +63,7 @@ from .toolset.registry import ToolRegistry
 from .upgrade.preflight import OsUpgradePreflight, OsUpgradeReport
 from .vault.vault import Vault
 from .vuln.feeds import Advisory, AdvisoryFeed, StaticAdvisoryFeed
+from .vuln.mitigations import MitigationRegistry, load_mitigations
 from .vuln.planner import RemediationItem, RemediationPlanner
 from .vuln.workflow import RemediationWorkflow, WorkflowResult
 
@@ -85,6 +87,7 @@ class Engine:
     workflow: RemediationWorkflow
     feed: AdvisoryFeed
     preflighter: OsUpgradePreflight
+    mitigations: MitigationRegistry
     clock: Callable[[], datetime] = _utcnow
 
     # -- inventory --------------------------------------------------------
@@ -254,12 +257,11 @@ class Engine:
     def mitigate(self, asset_id: str, cve_id: str) -> ToolResult:
         """Propose the published mitigation for a CVE where the vendor patch can't
         be installed (e.g. an EOL OS without ESM). Approval-gated (MITIGATE_CANARY)
-        and reversible. Only mitigations in the cited ``KNOWN_MITIGATIONS`` table
-        are offered — an uncatalogued CVE escalates to a human, never an invented
-        fix (rule #6). Returns a pending change_set_id until approved; re-call to
-        apply."""
-        from .vuln.mitigations import mitigation_for
-        m = mitigation_for(cve_id)
+        and reversible. Only mitigations in the loaded registry (built-ins + the
+        mitigations folder) are offered — an uncatalogued CVE escalates to a
+        human, never an invented fix (rule #6). Returns a pending change_set_id
+        until approved; re-call to apply."""
+        m = self.mitigations.for_cve(cve_id)
         if m is None:
             return ToolResult(
                 ok=False, tool="mitigation.apply_hardening",
@@ -352,6 +354,7 @@ def build_engine(
     advisory_feed: Any = None,
     enrich_kev: bool = False,
     kev_catalog: Any = None,
+    mitigations_dir: str | None = None,
 ) -> Engine:
     """Wire an Engine from parts.
 
@@ -404,10 +407,15 @@ def build_engine(
     the_transport = transport or SimulatedSSHTransport()
     conn_resolver = registry_connection_resolver(registry, clock=clock)
 
+    # Mitigation catalogue: built-ins + any operator folder, each entry's command
+    # validated against the reviewed catalog allowlist (a file can't add a new one).
+    mitigations = load_mitigations(mitigations_dir, allowed_templates=set(CATALOG))
+
     tools = ToolRegistry()
     ssh_executor = SSHExecutor(the_transport)
     tools.register(make_security_update_tool(ssh_executor, conn_resolver))
-    tools.register(make_mitigation_tool(ssh_executor, conn_resolver))
+    tools.register(make_mitigation_tool(ssh_executor, conn_resolver,
+                                        mitigations=mitigations.by_id))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))
@@ -442,6 +450,7 @@ def build_engine(
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
         feed=feed,
         preflighter=OsUpgradePreflight(),
+        mitigations=mitigations,
         clock=clock,
     )
 
@@ -457,6 +466,7 @@ def build_ssh_engine(
     advisory_feed: Any = None,
     enrich_kev: bool = False,
     aws_region: str | None = None,
+    mitigations_dir: str | None = None,
 ) -> Engine:
     """Engine with the REAL SSH backend: a paramiko transport, a file-backed
     vault (keys under ``key_dir``, referenced by key_ref), and a read-only SSH
@@ -485,15 +495,18 @@ def build_ssh_engine(
         advisory_feed=advisory_feed,
         enrich_kev=enrich_kev,
         aws_region=aws_region,
+        mitigations_dir=mitigations_dir,
     )
 
 
 def build_demo_engine(session_factory=None, *, aws_region: str | None = None,
-                      advisory_feed: Any = None, enrich_kev: bool = False) -> Engine:
+                      advisory_feed: Any = None, enrich_kev: bool = False,
+                      mitigations_dir: str | None = None) -> Engine:
     """Back-compat wrapper: the demo engine with simulated backends (persistent
     when a session_factory is given; live boto3 when aws_region is set)."""
     return build_engine(session_factory=session_factory, aws_region=aws_region,
-                        advisory_feed=advisory_feed, enrich_kev=enrich_kev)
+                        advisory_feed=advisory_feed, enrich_kev=enrich_kev,
+                        mitigations_dir=mitigations_dir)
 
 
 # Re-export for convenience.

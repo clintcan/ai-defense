@@ -1,0 +1,15 @@
+# Example mitigation file (also the canonical PwnKit entry; it overrides the
+# identical built-in). One file may hold a single mitigation, a list of them, or
+# a mapping with a top-level `mitigations:` list.
+#
+# Every `template`/`rollback_template` must already be allowlisted in the
+# reviewed catalog (src/ai_defense/ssh/catalog.py) — a file can map a CVE to an
+# existing reviewed command, but can never introduce a new one.
+
+- id: pwnkit-pkexec-suid
+  cves: [CVE-2021-4034]
+  title: Remove the setuid bit from /usr/bin/pkexec (PwnKit workaround)
+  source_ref: https://ubuntu.com/security/CVE-2021-4034
+  template: harden.disable_pkexec_suid          # allowlisted: applies the workaround
+  rollback_template: harden.restore_pkexec_suid # allowlisted: reverses it
+  description: remove setuid from /usr/bin/pkexec (reverse: restore 4755)

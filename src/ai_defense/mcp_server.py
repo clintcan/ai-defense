@@ -424,7 +424,8 @@ _DESCRIPTIONS = {t["name"]: t["description"] for t in TOOLS}
 def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None = None,
                 known_hosts: str | None = None, allow_unknown_hosts: bool = False,
                 aws_region: str | None = None, osv: bool = False,
-                osv_ecosystem: str = "Debian", kev: bool = False) -> Engine:
+                osv_ecosystem: str = "Debian", kev: bool = False,
+                mitigations_dir: str | None = None) -> Engine:
     if engine is not None:
         return engine
     sf = None
@@ -441,9 +442,10 @@ def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None =
                                 known_hosts=known_hosts,
                                 allow_unknown_hosts=allow_unknown_hosts,
                                 aws_region=aws_region, advisory_feed=feed,
-                                enrich_kev=kev)
+                                enrich_kev=kev, mitigations_dir=mitigations_dir)
     return build_demo_engine(session_factory=sf, aws_region=aws_region,
-                             advisory_feed=feed, enrich_kev=kev)
+                             advisory_feed=feed, enrich_kev=kev,
+                             mitigations_dir=mitigations_dir)
 
 
 def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/import-gated test
@@ -528,14 +530,17 @@ def serve(engine: Engine | None = None, *, db: str | None = None,
           ssh_keys: str | None = None, known_hosts: str | None = None,
           allow_unknown_hosts: bool = False,
           aws_region: str | None = None, osv: bool = False,
-          osv_ecosystem: str = "Debian", kev: bool = False) -> None:  # pragma: no cover
+          osv_ecosystem: str = "Debian", kev: bool = False,
+          mitigations_dir: str | None = None) -> None:  # pragma: no cover
     """Run the MCP server over stdio. Requires the ``mcp`` extra (>=2).
 
     With ``db`` the engine is durable and shares assets/approvals with the
     operator CLI. With ``ssh_keys`` it uses the real SSH backend (paramiko). With
     ``aws_region`` it uses live boto3 for the cloud tools. With ``osv`` it pulls
-    real advisories from OSV.dev for the packages a scan observes."""
+    real advisories from OSV.dev for the packages a scan observes. With
+    ``mitigations_dir`` it loads extra CVE mitigations from that folder."""
     eng = _engine_for(engine, db, ssh_keys=ssh_keys, known_hosts=known_hosts,
                       allow_unknown_hosts=allow_unknown_hosts, aws_region=aws_region,
-                      osv=osv, osv_ecosystem=osv_ecosystem, kev=kev)
+                      osv=osv, osv_ecosystem=osv_ecosystem, kev=kev,
+                      mitigations_dir=mitigations_dir)
     build_mcp_server(eng).run("stdio")

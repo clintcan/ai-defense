@@ -247,8 +247,17 @@ Where a host **can't** take the vendor patch (e.g. an EOL OS without ESM), ask
 Claude to *"mitigate CVE-2021-4034 on `<host>`"* — the `mitigate` tool applies the
 cited, **reversible** workaround (for PwnKit, stripping the setuid bit from
 `pkexec`), approval-gated and dry-run first, and records a rollback. Only CVEs
-with a catalogued mitigation (`vuln/mitigations.py`) are eligible; anything else
-escalates to a human.
+with a catalogued mitigation are eligible; anything else escalates to a human.
+
+The catalogue is the built-ins **plus any files in a mitigations folder** you
+point to with `--mitigations-dir` (yaml/json, one or many mitigations per file).
+Each entry must reference a command already allowlisted in the reviewed catalog —
+a file can map a CVE to an existing command, never add a new one. See
+[`mitigations/README.md`](../mitigations/README.md) for the format.
+
+```bat
+ai-defense mcp --db "..." --ssh-keys "..." --osv --kev --mitigations-dir mitigations
+```
 
 ## Safeguards that remain in force
 

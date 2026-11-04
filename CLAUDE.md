@@ -350,7 +350,12 @@ host.
     ages); `apt-get full-upgrade` (dry-run `--simulate` first); the same
     reboot step. If the file names neither the old nor the new codename (e.g. a
     symbolic `stable`/`oldstable` sources.list), it **refuses rather than
-    guesses** (rule #7) — a human verifies first.
+    guesses** (rule #7) — a human verifies first. The preflight also
+    **BLOCKs a Debian hop whose target is itself EOL** (`target_eol`): a retired
+    release's security pool moves to archive.debian.org, so the in-place hop
+    fails mid-download (seen live on bullseye, 2026-11-05) — rebuild on the
+    newest release instead. Ubuntu is exempt (its upgrader uses
+    old-releases.ubuntu.com for EOL hops).
   **Known v1 limitations:** the reconnect probe reuses the scanner's session
   rather than proving a brand-new login, and the down→up check (not a boot-id
   compare) can in principle be fooled by a transient blip; the canary→fleet

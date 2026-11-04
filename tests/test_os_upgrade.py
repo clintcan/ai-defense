@@ -163,15 +163,15 @@ def test_debian_threads_distro_and_codenames_from_the_preflight():
     # distro/old_codename/new_codename must come from the release-table lookup
     # (via the preflight report), never be left for the tool to guess.
     disp = _Dispatcher(upgrade="ok")
-    sc = _Scanner(_findings("10", distro="debian", codename="buster"),
+    sc = _Scanner(_findings("11", distro="debian", codename="bullseye"),
                   [_findings(None, reachable=False),
-                   _findings("11", distro="debian", codename="bullseye")])
+                   _findings("12", distro="debian", codename="bookworm")])
     r = _wf(disp, sc).run("h")
-    assert r.status == UPGRADED and r.post_os == "11"
+    assert r.status == UPGRADED and r.post_os == "12"
     up = next(i for i in disp.calls if i.tool == OS_UPGRADE_TOOL)
     assert up.params["distro"] == "debian"
-    assert up.params["old_codename"] == "buster"
-    assert up.params["new_codename"] == "bullseye"
+    assert up.params["old_codename"] == "bullseye"
+    assert up.params["new_codename"] == "bookworm"
 
 
 # --- end-to-end through the engine (real policy + approval gate) ---------
@@ -439,13 +439,13 @@ def test_mcp_os_upgrade_pending_shape():
 # --- end-to-end through the engine: Debian host ---------------------------
 
 class _DebianInspector:
-    """Reports a static Debian 10 (buster) host — mirrors demo.py's DemoInspector
+    """Reports a static Debian 11 (bullseye) host — mirrors demo.py's DemoInspector
     but for the Debian path."""
 
     def collect(self, asset_id):
         return {"installed_packages": {}, "applied_patches": [], "misconfigurations": [],
-                "os_release": {"ID": "debian", "VERSION_ID": "10",
-                               "VERSION_CODENAME": "buster"}}
+                "os_release": {"ID": "debian", "VERSION_ID": "11",
+                               "VERSION_CODENAME": "bullseye"}}
 
     def collect_upgrade_state(self, asset_id):
         return {"reboot_required": False, "disk_free_mb": 20480,
@@ -453,13 +453,14 @@ class _DebianInspector:
 
 
 def test_engine_debian_canary_swaps_sources_and_upgrades_then_halts_in_sim():
-    eng = build_engine(inspector=_DebianInspector(), transport=_DebianTransport())
+    eng = build_engine(inspector=_DebianInspector(), transport=_DebianTransport(
+        sources="deb http://deb.debian.org/debian bullseye main\n"))
     _fast_reconnect(eng)
     eng.registry.register(_host("deb-h"))
 
     p = eng.os_upgrade("deb-h")
     assert p.status == UPGRADE_PENDING and p.preflight.distro == "debian"
-    assert p.preflight.target_version == "11" and p.preflight.target_codename == "bullseye"
+    assert p.preflight.target_version == "12" and p.preflight.target_codename == "bookworm"
 
     eng.approve(p.change_set_id, "op1")
     eng.approve(p.change_set_id, "op2")

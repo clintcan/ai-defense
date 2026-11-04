@@ -98,6 +98,16 @@ class OsUpgradePreflight:
             )
 
         blockers = _blockers(findings.system_state, self._min_free_mb, notes)
+        # A retired Debian release's security pool moves to archive.debian.org
+        # (bullseye's 404'd on security.debian.org after its 2026-08-31 LTS end),
+        # so an in-place hop onto it fails mid-download. Ubuntu is exempt: its
+        # upgrader handles EOL hops via old-releases.ubuntu.com.
+        if rel.distro == "debian" and releases.support_status(target, today) == "eol":
+            blockers.append(Blocker(
+                "target_eol",
+                f"the single-step target {rel.distro} {target.version} ({target.codename}) "
+                f"is itself end of life; its archives are retired, so an in-place hop "
+                f"cannot complete. Rebuild on {rel.distro} {path[-1]} and migrate instead."))
         verdict = UpgradeVerdict.BLOCKED if blockers else UpgradeVerdict.READY
         notes.append(f"Supported single-step target is {rel.distro} {target.version} "
                      f"({target.codename}); full path: {' -> '.join(path)}.")

@@ -92,9 +92,9 @@ def test_unknown_distro_escalates():
 
 def test_missing_probes_do_not_fake_readiness():
     # No system_state: a target exists, but the report says readiness is unverified.
-    r = OsUpgradePreflight().assess(_findings({"ID": "debian", "VERSION_ID": "10"}), NOW)
+    r = OsUpgradePreflight().assess(_findings({"ID": "debian", "VERSION_ID": "11"}), NOW)
     assert r.verdict is UpgradeVerdict.READY      # path is known
-    assert r.target_version == "11"
+    assert r.target_version == "12"
     assert any("probes were not collected" in n for n in r.notes)
 
 
@@ -187,3 +187,30 @@ def test_mcp_handle_call_upgrade_preflight():
     assert rep["target_version"] == "20.04"
     assert rep["verdict"] in {"ready", "blocked"}
     assert rep["source_ref"]
+
+
+_OK_STATE = {"reboot_required": False, "disk_free_mb": 20480,
+             "held_packages": [], "broken_packages_report": ""}
+
+
+def test_debian_hop_onto_an_eol_release_is_blocked():
+    # db-proxy-1, 2026-11-05: buster -> bullseye after bullseye's LTS ended;
+    # its security pool had moved to archive.debian.org, so full-upgrade 404'd.
+    r = OsUpgradePreflight().assess(
+        _findings({"ID": "debian", "VERSION_ID": "10"}, _OK_STATE), NOW)
+    assert r.verdict is UpgradeVerdict.BLOCKED
+    b = next(b for b in r.blockers if b.code == "target_eol")
+    assert "debian 11" in b.detail and "Rebuild on debian 13" in b.detail
+
+
+def test_debian_hop_before_target_eol_is_ready():
+    r = OsUpgradePreflight().assess(
+        _findings({"ID": "debian", "VERSION_ID": "10"}, _OK_STATE), date(2026, 1, 1))
+    assert r.verdict is UpgradeVerdict.READY and r.target_version == "11"
+
+
+def test_ubuntu_hop_onto_an_eol_release_is_not_blocked_by_this_rule():
+    # do-release-upgrade handles EOL intermediates via old-releases.ubuntu.com
+    r = OsUpgradePreflight().assess(
+        _findings({"ID": "ubuntu", "VERSION_ID": "16.04"}, _OK_STATE), date(2040, 1, 1))
+    assert not any(b.code == "target_eol" for b in r.blockers)

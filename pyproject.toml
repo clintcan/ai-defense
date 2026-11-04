@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,7 @@ name = "ai-defense"
 version = "0.0.1"
 description = "Defensive orchestration & remediation harness (LLM-as-planner, toolset-enforced)"
 requires-python = ">=3.11"
+license = "Apache-2.0"
 dependencies = [
     "sqlalchemy>=2.0,<3.0",   # persistence layer (db/)
     # Pin and add as components are implemented. Suggested:

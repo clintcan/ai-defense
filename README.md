@@ -236,3 +236,7 @@ python -m ai_defense mcp --db sqlite+pysqlite:///ai.db
 4. Every remote-mutating action is human-approved and audit-logged.
 5. Default deny; new provider methods / command templates are unreachable until
    wrapped, reviewed, and allowlisted.
+
+## License
+
+Licensed under the [Apache License 2.0](./LICENSE).

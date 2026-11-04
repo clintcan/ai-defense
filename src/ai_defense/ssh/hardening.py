@@ -24,6 +24,7 @@ class PrimitiveKind(str, Enum):
     KERNEL_MODULE = "kernel_module"
     SERVICE = "service"
     FIREWALL_RULE = "firewall_rule"
+    FILE_PERM = "file_perm"        # e.g. strip a setuid bit (PwnKit pkexec workaround)
 
 
 # --- config edits --------------------------------------------------------

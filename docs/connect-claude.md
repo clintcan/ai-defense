@@ -243,6 +243,13 @@ than a misleading `no_patch_available`, and an unreachable host returns
 patch". Likewise `plan` adds `feed_degraded: true` when its advisory fetch was
 incomplete, so a thin plan isn't read as a clean bill of health.
 
+Where a host **can't** take the vendor patch (e.g. an EOL OS without ESM), ask
+Claude to *"mitigate CVE-2021-4034 on `<host>`"* — the `mitigate` tool applies the
+cited, **reversible** workaround (for PwnKit, stripping the setuid bit from
+`pkexec`), approval-gated and dry-run first, and records a rollback. Only CVEs
+with a catalogued mitigation (`vuln/mitigations.py`) are eligible; anything else
+escalates to a human.
+
 ## Safeguards that remain in force
 
 - Claude only emits intents through these tools; it cannot run arbitrary

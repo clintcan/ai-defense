@@ -22,6 +22,8 @@ DEMO_POLICY: dict[str, Any] = {
     "approvals": {
         "patch_canary": {"required": 1},
         "patch_fleet": {"required": 2, "after": "canary_health_ok"},
+        "mitigate_canary": {"required": 1},
+        "mitigate_fleet": {"required": 2, "after": "canary_health_ok"},
         "cleanup": {"required": 1},
         "onboard": {"required": 1},
     },

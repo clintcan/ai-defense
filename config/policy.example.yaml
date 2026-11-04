@@ -18,9 +18,10 @@ rate_limits:
   fleet_concurrency: 25
 
 approvals:
-  patch_canary:   { required: 1 }
-  patch_fleet:    { required: 1, after: canary_health_ok }
-  mitigate_fleet: { required: 1, after: canary_health_ok }
+  patch_canary:    { required: 1 }
+  patch_fleet:     { required: 1, after: canary_health_ok }
+  mitigate_canary: { required: 1 }
+  mitigate_fleet:  { required: 1, after: canary_health_ok }
   emergency:      { required: 2 }   # outside window / KEV emergency
   cleanup:        { required: 1 }   # deleting a pre-change snapshot once the fix is stable
   onboard:        { required: 1 }   # registering a new asset into the authorization ledger

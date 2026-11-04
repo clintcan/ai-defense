@@ -86,4 +86,21 @@ CATALOG: dict[str, CommandTemplate] = {
         read_only=False,
         dry_run_variant=["dnf", "upgrade", "--assumeno", "--security", "{package}"],
     ),
+    # --- hardening mitigations (approval-gated), fixed target, reversible ----
+    # CVE-2021-4034 (PwnKit): strip / restore the setuid bit on pkexec. Fixed
+    # argv on a fixed path (no parameters) -> no injection surface. The dry-run
+    # just reads the current mode so the approver sees state and a missing binary
+    # aborts the apply.
+    "harden.disable_pkexec_suid": CommandTemplate(
+        "harden.disable_pkexec_suid",
+        ["chmod", "0755", "/usr/bin/pkexec"],
+        read_only=False,
+        dry_run_variant=["stat", "-c", "%a %n", "/usr/bin/pkexec"],
+    ),
+    "harden.restore_pkexec_suid": CommandTemplate(
+        "harden.restore_pkexec_suid",
+        ["chmod", "4755", "/usr/bin/pkexec"],
+        read_only=False,
+        dry_run_variant=["stat", "-c", "%a %n", "/usr/bin/pkexec"],
+    ),
 }

@@ -49,7 +49,11 @@ from .report import ReportProvenance, build_report, write_report
 from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
 from .ssh.executor import SSHExecutor
-from .ssh.tools import make_security_update_tool, registry_connection_resolver
+from .ssh.tools import (
+    make_mitigation_tool,
+    make_security_update_tool,
+    registry_connection_resolver,
+)
 from .toolset.dispatch import Dispatcher
 from .toolset.intents import ActionClass, Intent, ToolResult
 from .toolset.policy import PolicyEngine
@@ -247,6 +251,26 @@ class Engine:
         return self.workflow.run(item, snapshot=snapshot,
                                  existing_snapshot_ids=existing_snapshot_ids)
 
+    def mitigate(self, asset_id: str, cve_id: str) -> ToolResult:
+        """Propose the published mitigation for a CVE where the vendor patch can't
+        be installed (e.g. an EOL OS without ESM). Approval-gated (MITIGATE_CANARY)
+        and reversible. Only mitigations in the cited ``KNOWN_MITIGATIONS`` table
+        are offered — an uncatalogued CVE escalates to a human, never an invented
+        fix (rule #6). Returns a pending change_set_id until approved; re-call to
+        apply."""
+        from .vuln.mitigations import mitigation_for
+        m = mitigation_for(cve_id)
+        if m is None:
+            return ToolResult(
+                ok=False, tool="mitigation.apply_hardening",
+                summary=f"no catalogued mitigation for {cve_id} — escalate for a human "
+                        f"decision (an OS upgrade may be the real fix)")
+        return self.dispatcher.dispatch(Intent(
+            tool="mitigation.apply_hardening",
+            params={"asset_id": asset_id, "mitigation_id": m.mitigation_id},
+            targets=[asset_id], action_class=ActionClass.MITIGATE_CANARY,
+            reason=f"mitigate {cve_id} on {asset_id}: {m.title}", source_ref=m.source_ref))
+
     # -- approval / audit -------------------------------------------------
     def approve(self, change_set_id: str, approver: str = "operator") -> ApprovalState:
         return self.approvals.decide(change_set_id, approver, approve=True, now=self.clock())
@@ -381,8 +405,9 @@ def build_engine(
     conn_resolver = registry_connection_resolver(registry, clock=clock)
 
     tools = ToolRegistry()
-    tools.register(make_security_update_tool(
-        SSHExecutor(the_transport), conn_resolver))
+    ssh_executor = SSHExecutor(the_transport)
+    tools.register(make_security_update_tool(ssh_executor, conn_resolver))
+    tools.register(make_mitigation_tool(ssh_executor, conn_resolver))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))

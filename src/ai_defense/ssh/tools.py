@@ -14,6 +14,7 @@ rollback action.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from ..registry.assets import AssetRegistry, ConnectionInfo
@@ -23,6 +24,7 @@ from .executor import SSHExecutor
 from .hardening import PrimitiveKind, RollbackAction
 
 SECURITY_UPDATE_TOOL = "patch.apply_security_update"
+MITIGATION_TOOL = "mitigation.apply_hardening"
 
 ConnectionResolver = Callable[[str], ConnectionInfo]
 
@@ -114,6 +116,98 @@ def make_security_update_tool(
                 "asset_id": {"type": "string"},
                 "package": {"type": "string"},
                 "snapshot_id": {"type": "string"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.MUTATING,
+    )
+
+
+@dataclass(frozen=True)
+class _MitigationCommand:
+    template: str                 # allowlisted catalog template to apply
+    rollback_template: str        # allowlisted catalog template to undo it
+    description: str
+
+
+# Allowlisted hardening mitigations the toolset will apply, keyed by the
+# ``mitigation_id`` named in ``vuln.mitigations``. DEFAULT DENY: an id not here is
+# refused, so the planner can never ask for an arbitrary command (rule #3/#5).
+_MITIGATIONS: dict[str, _MitigationCommand] = {
+    "pwnkit-pkexec-suid": _MitigationCommand(
+        template="harden.disable_pkexec_suid",
+        rollback_template="harden.restore_pkexec_suid",
+        description="remove setuid from /usr/bin/pkexec (reverse: restore 4755)",
+    ),
+}
+
+
+def make_mitigation_tool(
+    executor: SSHExecutor, connection_resolver: ConnectionResolver,
+) -> ToolSpec:
+    """Build the ``mitigation.apply_hardening`` tool (capability=MUTATING).
+
+    Params: ``asset_id`` (connection resolved from the registry) and
+    ``mitigation_id`` (must be in the allowlisted ``_MITIGATIONS`` map). Runs the
+    mapped, reversible catalog command (dry-run first) and records a rollback
+    action that restores the prior state. The planner never supplies a command —
+    only a mitigation id the toolset maps to a reviewed template."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        asset_id = params["asset_id"]
+        mitigation_id = params["mitigation_id"]
+        mc = _MITIGATIONS.get(mitigation_id)
+        if mc is None:
+            return ToolResult(
+                ok=False, tool=MITIGATION_TOOL,
+                summary=f"unknown mitigation (not allowlisted): {mitigation_id}",
+                data={"mitigation_id": mitigation_id})
+
+        conn = connection_resolver(asset_id)       # host/user/port/key_ref from registry
+        key = resolve_secret(conn.key_ref)          # key value from the vault
+
+        outcome = executor.run_template(
+            conn.host, mc.template, {}, key=key,
+            user=conn.user, port=conn.port, dry_run_first=True,
+        )
+        rollback = RollbackAction(
+            kind=PrimitiveKind.FILE_PERM,
+            description=f"revert mitigation on {asset_id}: {mc.description}",
+            payload={"asset_id": asset_id, "rollback_template": mc.rollback_template},
+        )
+
+        if not outcome.applied:
+            return ToolResult(
+                ok=False, tool=MITIGATION_TOOL,
+                summary=f"not applied: {outcome.blocked_reason}",
+                data={"blocked_reason": outcome.blocked_reason,
+                      "dry_run_exit": outcome.dry_run.exit_code if outcome.dry_run else None},
+                resolved_command=outcome.resolved_command)
+
+        res = outcome.result
+        ok = res is not None and res.exit_code == 0
+        return ToolResult(
+            ok=ok, tool=MITIGATION_TOOL,
+            summary=(f"mitigation '{mitigation_id}' applied on {asset_id}" if ok
+                     else f"mitigation '{mitigation_id}' failed on {asset_id}"),
+            data={
+                "asset_id": asset_id, "mitigation_id": mitigation_id,
+                "exit_code": res.exit_code if res else None,
+                "stdout": res.stdout if res else "",
+                "rollback": {"kind": rollback.kind.value,
+                             "description": rollback.description,
+                             "payload": rollback.payload},
+            },
+            resolved_command=outcome.resolved_command)
+
+    return ToolSpec(
+        name=MITIGATION_TOOL,
+        schema={
+            "type": "object",
+            "required": ["asset_id", "mitigation_id"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "mitigation_id": {"type": "string"},
             },
         },
         executor=_execute,

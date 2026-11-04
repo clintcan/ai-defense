@@ -221,6 +221,14 @@ record — and internal error text is never surfaced to the planner.
     advisory — clearly labeled as a temporary mitigation, with a tracking item
     to apply the real patch once released.
   - **Neither available** → raise for human decision; do not improvise.
+
+  Published mitigations come from an **auditable table** (`vuln/mitigations.py`),
+  each citing its advisory (rule #6) — never invented. Applying one is the
+  approval-gated **`mitigate`** tool: it maps the CVE to an **allowlisted,
+  reversible** hardening command (for CVE-2021-4034/PwnKit, stripping the setuid
+  bit from `/usr/bin/pkexec`, reversed by restoring it), dry-runs first, and
+  records a rollback. Use it where the vendor patch can't be installed (an EOL OS
+  without ESM); an uncatalogued CVE escalates to a human instead.
 - **Remediation is not only package installs.** Mitigation and hardening
   frequently means *changing system configuration*. Supported remediation action
   types:

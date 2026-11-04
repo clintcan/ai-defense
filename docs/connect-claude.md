@@ -3,9 +3,10 @@
 The MCP server exposes a focused set of tools Claude can call in plain language:
 `list_assets`, `scan`, `plan`, `upgrade_preflight` (read-only OS-upgrade
 eligibility), `report` (write Markdown + DefectDojo/generic JSON to local files),
-`remediate`, `approve_change`, `audit_tail`, plus the cloud tools (below). Every
-call still goes through the dispatcher, so policy, authorization, the approval
-gate, rate limits, redaction, and the audit log all apply.
+`remediate`, `update_asset` (correct a host's connection without re-onboarding),
+`approve_change`, `audit_tail`, plus the cloud tools (below). Every call still
+goes through the dispatcher, so policy, authorization, the approval gate, rate
+limits, redaction, and the audit log all apply.
 
 > Paths below assume this repo at `C:\path\to\ai_defense` and the
 > `.venv` created by `install.ps1` / `install.sh`. Adjust if yours differ.
@@ -250,6 +251,16 @@ selects every registered `ssh-host` asset (cloud-account and control-plane
 assets are not SSH-scannable), so onboard your hosts first (and point `--db` at
 the database they were onboarded into). Reports are written locally only.
 
+Two fail-safes make a report honest about what it couldn't see. A host that
+could **not** be scanned is listed with a type-based, actionable reason
+(`TimeoutError` → unreachable on :22, check the firewall; `AuthenticationException`
+→ verify user/key_ref; `BadHostKeyException` → host rebuilt, clear the stale
+`known_hosts` entry). And if the advisory feed (OSV) was unreachable or
+rate-limited mid-sweep, the fetch is **incomplete** — so every artifact carries a
+`feed_degraded` flag and a loud banner, and the DefectDojo file tags findings
+`scan-degraded` (import it with auto-close disabled). A degraded or partial scan
+is never presented as a clean bill of health.
+
 ## Bulk onboarding (fill the fleet from cloud discovery)
 
 `report --all` only covers hosts that are **registered**. To turn your
@@ -282,6 +293,28 @@ ai-defense bulk-onboard --account 123456789012 --aws-region us-east-1 ^
 - `--environment` tags all hosts (otherwise each instance's `env` tag, else
   `unknown`). `--dry-run` previews; without it (and with `--db`) the signed
   registrations are persisted. Afterwards, `report --all` covers the fleet.
+
+## Correcting a registered host (`update-asset`)
+
+Connection details drift: a key is rotated, a rebuilt host changes address or
+host key, or a login was onboarded wrong. Fix just the connection **without
+re-onboarding** — the authorization/attestation is preserved (unlike
+re-registering, which re-signs it).
+
+- **In chat:** *"Update web-01 to use key `ssh-key/web-01-new`"* → Claude calls
+  `update_asset`, which returns a **pending** change-set until you approve
+  (exactly like `remediate`), then applies it.
+- **Operator CLI** (out-of-band, immediate):
+
+```bat
+:: cmd.exe (Windows) — one line
+ai-defense update-asset --db "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db" --asset-id web-01 --key-ref ssh-key/web-01-new
+```
+
+Change any of `--host` / `--port` / `--user` / `--key-ref` (only what you pass is
+touched). A new `key_ref` must already resolve in the vault — the key value is
+never handled. Identity fields (owner/environment) and the attestation are
+deliberately **not** updatable this way; changing those is a re-onboarding.
 
 ## Real SSH mode (patch actual hosts)
 

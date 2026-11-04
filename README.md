@@ -114,7 +114,35 @@ Working vertical slice. Implemented and tested end to end:
 - **CISA KEV enrichment** — `--kev` fetches CISA's Known Exploited
   Vulnerabilities catalog and flags matching advisories `kev=True`, so
   actively-exploited CVEs sort to the top of the plan. Wraps any feed (OSV or
-  the demo set).
+  the demo set). If OSV is unreachable or rate-limits mid-sweep the feed degrades
+  rather than aborting, and records that it did so (`OsvFeed.health`).
+
+- **OS-upgrade preflight (read-only)** — for an EOL/ESM host, where many CVEs
+  have no in-place fix, `upgrade_preflight` reports the current release and
+  support status, the supported single-step target and full path to the newest
+  release, and any blockers (pending reboot, held/broken packages, low disk),
+  reasoning only from an auditable release table (`upgrade/releases.py`). It
+  advises; the more strongly gated `OS_UPGRADE` workflow is future work.
+
+- **Reporting & export** — `report` turns one authenticated scan per host into
+  four **local-only** deliverables: an executive summary and a technical report
+  (Markdown, each finding citing its advisory URL), a documented versioned
+  `findings.generic.json`, and a `findings.defectdojo.json` (DefectDojo Generic
+  Findings Import). A degraded advisory fetch is flagged on every artifact (and
+  tags DefectDojo findings `scan-degraded`) so an incomplete scan never reads as
+  a clean bill of health; a host that could not be scanned is listed with a
+  type-based, actionable reason (firewall / auth / changed host key).
+
+- **Bulk onboarding** — `bulk-onboard` registers many discovered cloud instances
+  as `ssh-host` assets in one operator pass (SSH user inferred per blueprint; the
+  key stays in the vault, referenced by `key_ref`; hosts with no key or address
+  are skipped, never guessed).
+
+- **Correcting a registered asset** — the `update-asset` CLI and the
+  approval-gated `asset.update_connection` tool change an ssh-host's connection
+  (`host`/`port`/`user`/`key_ref`) without re-onboarding, **preserving its
+  authorization** (the DB update appends no new attestation). The tool targets
+  the asset itself, so only an already-authorized asset can be updated.
 
 Still stubbed: other cloud providers (GCP/Azure) — the seams are in place. Run
 `pytest` and `ruff check src tests`.
@@ -157,11 +185,13 @@ pip install -e ".[mcp]"
 python -m ai_defense mcp            # MCP server over stdio
 ```
 
-Tools exposed: `list_assets`, `scan`, `plan`, `remediate`, `approve_change`,
-`audit_tail`. Every call routes through the dispatcher, so the model proposes and
-the toolset enforces: a `remediate` returns *pending* with a `change_set_id`
-until a human calls `approve_change`, and the MCP client also prompts the human
-before any tool runs. Example client config:
+Tools exposed: `list_assets`, `scan`, `plan`, `upgrade_preflight`, `report`,
+`remediate`, `update_asset`, `approve_change`, `audit_tail`, plus the cloud tools
+(`onboard_cloud_account`, `cloud_regions`, `cloud_discover`, `cloud_patch_state`,
+`cloud_remediate`). Every call routes through the dispatcher, so the model
+proposes and the toolset enforces: a `remediate` returns *pending* with a
+`change_set_id` until a human calls `approve_change`, and the MCP client also
+prompts the human before any tool runs. Example client config:
 
 ### Durable, out-of-band approvals
 

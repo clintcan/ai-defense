@@ -51,6 +51,7 @@ class ExecOutcome:
     dry_run: CommandOutput | None = None
     result: CommandOutput | None = None
     blocked_reason: str | None = None   # set when refused before applying
+    diff: str | None = None             # unified diff shown to the approver (config edits)
 
 
 class SSHExecutor:

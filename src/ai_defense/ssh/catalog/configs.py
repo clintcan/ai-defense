@@ -50,7 +50,40 @@ class DropInRemove:
     reload: tuple[str, ...] = ()
 
 
+# In-place edits (for files with no conf.d) touch only a marker-delimited block
+# the tool owns, and only in these reviewed, allowlisted files — default deny.
+ALLOWED_EDIT_PATHS: tuple[str, ...] = (
+    "/etc/ssh/sshd_config",
+    "/etc/sysctl.conf",
+    "/etc/login.defs",
+)
+
+
+def edit_path_allowed(path: str) -> bool:
+    return path in ALLOWED_EDIT_PATHS
+
+
+@dataclass(frozen=True)
+class ConfigBlockWrite:
+    name: str
+    path: str                        # existing file; must be in ALLOWED_EDIT_PATHS
+    marker: str                      # unique id of the managed block
+    body: str                        # managed block content
+    validate: tuple[str, ...] = ()
+    reload: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ConfigBlockRemove:
+    name: str
+    path: str
+    marker: str
+    validate: tuple[str, ...] = ()
+    reload: tuple[str, ...] = ()
+
+
 _MPTCP_PATH = "/etc/sysctl.d/80-ai-defense-mptcp.conf"
+_SSHD = "/etc/ssh/sshd_config"
 
 # Allowlisted config actions, keyed by name. A mitigation's template /
 # rollback_template may reference one of these (apply / reverse).
@@ -68,9 +101,31 @@ CONFIG_ACTIONS: dict[str, DropInWrite | DropInRemove] = {
         path=_MPTCP_PATH,
         reload=("sudo", "-n", "sysctl", "--system"),
     ),
+    # In-place (no conf.d on older OpenSSH): disable X11 forwarding in a managed
+    # block. Benign — it can't sever SSH access. Validated by `sshd -t`.
+    "config.sshd_disable_x11": ConfigBlockWrite(
+        name="config.sshd_disable_x11", path=_SSHD, marker="sshd-x11",
+        body="X11Forwarding no",
+        validate=("sudo", "-n", "sshd", "-t"),
+        reload=("sudo", "-n", "systemctl", "reload", "sshd"),
+    ),
+    "config.sshd_disable_x11.remove": ConfigBlockRemove(
+        name="config.sshd_disable_x11.remove", path=_SSHD, marker="sshd-x11",
+        validate=("sudo", "-n", "sshd", "-t"),
+        reload=("sudo", "-n", "systemctl", "reload", "sshd"),
+    ),
 }
 
-# Fail fast if a reviewed action ever points outside the allowlisted dirs.
+
+def _action_path_ok(a) -> bool:
+    if isinstance(a, (DropInWrite, DropInRemove)):
+        return dir_allowed(a.path)
+    if isinstance(a, (ConfigBlockWrite, ConfigBlockRemove)):
+        return edit_path_allowed(a.path)
+    return False
+
+
+# Fail fast if a reviewed action ever points at a non-allowlisted path.
 for _a in CONFIG_ACTIONS.values():
-    if not dir_allowed(_a.path):
+    if not _action_path_ok(_a):
         raise ValueError(f"config action {_a.name!r} targets a non-allowlisted path: {_a.path}")

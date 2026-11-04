@@ -1,0 +1,16 @@
+# In-place hardening for hosts whose OpenSSH has no sshd_config.d drop-in dir:
+# disable X11 forwarding inside a managed, marker-delimited block in
+# /etc/ssh/sshd_config. Benign — it can't sever SSH access. The edit backs up the
+# file, validates with `sshd -t`, reloads, and restores from backup if validation
+# fails. Reverse removes the managed block. Keyed under a hardening id (a CIS
+# recommendation, not a single CVE).
+- id: sshd-disable-x11
+  cves: [SSHD-X11-FORWARDING]
+  title: "sshd: disable X11 forwarding (managed block, validated, reversible)"
+  source_ref: https://man.openbsd.org/sshd_config#X11Forwarding
+  template: config.sshd_disable_x11
+  rollback_template: config.sshd_disable_x11.remove
+  description: >-
+    ensure 'X11Forwarding no' in an ai-defense-managed block in
+    /etc/ssh/sshd_config; backs up first, validates with sshd -t, reloads, and
+    restores on failure. Reverse removes the block.

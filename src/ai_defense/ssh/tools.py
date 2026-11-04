@@ -199,7 +199,8 @@ def make_mitigation_tool(
                 ok=False, tool=MITIGATION_TOOL,
                 summary=f"not applied: {outcome.blocked_reason}",
                 data={"blocked_reason": outcome.blocked_reason,
-                      "dry_run_exit": outcome.dry_run.exit_code if outcome.dry_run else None},
+                      "dry_run_exit": outcome.dry_run.exit_code if outcome.dry_run else None,
+                      "diff": outcome.diff},
                 resolved_command=outcome.resolved_command)
 
         res = outcome.result
@@ -213,6 +214,7 @@ def make_mitigation_tool(
                 "exit_code": res.exit_code if res else None,
                 "stdout": res.stdout if res else "",
                 "stderr": res.stderr if res else "",
+                "diff": outcome.diff,
                 "rollback": {"kind": rollback.kind.value,
                              "description": rollback.description,
                              "payload": rollback.payload},

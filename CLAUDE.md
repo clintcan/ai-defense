@@ -226,10 +226,13 @@ record — and internal error text is never surfaced to the planner.
   `vuln/mitigations.py` plus an operator **mitigations folder** (`--mitigations-dir`;
   yaml/json, one or many per file), merged by id. Each entry cites its advisory
   (rule #6) and names an **allowlisted action** to apply and one to reverse it —
-  either a fixed catalog **command** (`ssh/catalog/`) or a managed **config
-  drop-in** (`ssh/catalog/configs.py`: a reviewed file written into an allowlisted
-  conf.d directory via `sudo -n tee`, validated and reloaded, reversed by deleting
-  it). The loader **rejects** any entry whose action isn't already reviewed, so a
+  either a fixed catalog **command** (`ssh/catalog/`), a managed **config drop-in**
+  (`ssh/catalog/configs.py`: a reviewed file written into an allowlisted conf.d
+  directory via `sudo -n tee`, validated and reloaded, reversed by deleting it), or
+  an **in-place marker-delimited block edit** of an allowlisted file (read, backed
+  up, diffed, written, validated with `sshd -t`/etc., reloaded, and **restored from
+  backup if validation fails** — the 6a dance; reversed by removing the block). The
+  loader **rejects** any entry whose action isn't already reviewed, so a
   dropped file can map a CVE to an existing action but can never introduce a new
   command (rules #3/#5). Applying one is the approval-gated **`mitigate`** tool: it
   dry-runs / validates first and records a rollback (CVE-2021-4034/PwnKit strips

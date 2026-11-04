@@ -48,6 +48,7 @@ mapping with a top-level `mitigations:` list. Fields:
 | `pwnkit.yaml` | CVE-2021-4034 (PwnKit): strip setuid from `pkexec` | command `harden.disable_pkexec_suid` |
 | `tcp-sack-panic.yaml` | CVE-2019-11477/11478/11479 (SACK Panic): disable TCP SACK | command `harden.disable_tcp_sack` |
 | `mptcp.yaml` | Disable Multipath TCP persistently | config drop-in `config.sysctl_mptcp_off` |
+| `sshd-x11.yaml` | sshd: disable X11 forwarding (no conf.d) | in-place block edit `config.sshd_disable_x11` |
 
 A `template`/`rollback_template` may name a **command** (a fixed argv in
 `ssh/catalog/`) or a **config action** (a managed drop-in in

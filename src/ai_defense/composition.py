@@ -41,6 +41,7 @@ from .demo import (
 from .onboarding import (
     build_ssh_asset,
     make_asset_register_tool,
+    make_asset_update_tool,
     make_cloud_account_register_tool,
 )
 from .registry.assets import Asset, AssetRegistry, Authorization
@@ -101,6 +102,31 @@ class Engine:
         return self.dispatcher.dispatch(Intent(
             tool="cloud.register_account", params=params, targets=[target],
             action_class=ActionClass.ONBOARD, reason="onboard cloud account"))
+
+    def update_asset_connection(self, asset_id: str, *, host: str | None = None,
+                                port: int | None = None, user: str | None = None,
+                                key_ref: str | None = None) -> ToolResult:
+        """Propose a connection-info correction (asset.update_connection) for an
+        already-registered ssh-host — a rotated key_ref, a changed address/port,
+        or a corrected login — preserving its authorization. Approval-gated
+        (ONBOARD): returns a pending change_set_id until a human approves, then
+        re-call to apply. The intent targets the asset itself, so only an already-
+        authorized asset can be updated."""
+        fields = {k: v for k, v in
+                  {"host": host, "port": port, "user": user, "key_ref": key_ref}.items()
+                  if v is not None}
+        if not fields:
+            return ToolResult(ok=False, tool="asset.update_connection",
+                              summary="no connection fields to update "
+                                      "(provide host, port, user, and/or key_ref)")
+        asset = self.registry.get(asset_id)
+        if asset is None or asset.connection is None:
+            return ToolResult(ok=False, tool="asset.update_connection",
+                              summary=f"not an updatable ssh-host asset: {asset_id}")
+        return self.dispatcher.dispatch(Intent(
+            tool="asset.update_connection", params={"asset_id": asset_id, **fields},
+            targets=[asset_id], action_class=ActionClass.ONBOARD,
+            reason=f"update connection for {asset_id}"))
 
     # -- detect / plan / remediate ---------------------------------------
     def scan(self, asset_ids: list[str]) -> list[HostFindings]:
@@ -334,6 +360,7 @@ def build_engine(
     tools.register(make_patch_baseline_tool(client_factory))
     tools.register(make_regions_tool(client_factory))
     tools.register(make_asset_register_tool(registry.register))   # writes through to DB
+    tools.register(make_asset_update_tool(registry.update_connection))
     tools.register(make_cloud_account_register_tool(registry.register))
 
     dispatcher = Dispatcher(

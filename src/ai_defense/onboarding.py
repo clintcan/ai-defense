@@ -23,6 +23,7 @@ from .toolset.intents import ToolResult
 from .toolset.registry import ToolCapability, ToolSpec
 
 ASSET_REGISTER_TOOL = "asset.register"
+ASSET_UPDATE_TOOL = "asset.update_connection"
 CLOUD_ACCOUNT_REGISTER_TOOL = "cloud.register_account"
 
 
@@ -52,6 +53,20 @@ def register_ssh_host(repo, **kwargs) -> Asset:
     asset = build_ssh_asset(**kwargs)
     repo.save(asset)
     return asset
+
+
+def update_ssh_connection(repo, asset_id: str, *, host: str | None = None,
+                          port: int | None = None, user: str | None = None,
+                          key_ref: str | None = None) -> Asset:
+    """Option 1 (operator, out-of-band): correct an already-registered ssh-host's
+    connection fields — e.g. a rotated ``key_ref`` or a changed address — WITHOUT
+    re-onboarding. The authorization/attestation is preserved; only the connection
+    changes. ``repo`` exposes ``update_connection`` (AssetRepository or a registry).
+
+    Like ``register-vps``, the key must already be in the vault under ``key_ref``;
+    this stores only the reference, never the key."""
+    return repo.update_connection(asset_id, host=host, port=port, user=user,
+                                  key_ref=key_ref)
 
 
 # SSH login user by cloud image family (substring match on the platform /
@@ -215,6 +230,63 @@ def make_asset_register_tool(register_fn: Callable[[Asset], None]) -> ToolSpec:
                 "user": {"type": "string"},
                 "port": {"type": "integer"},
                 "ttl_days": {"type": "integer"},
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.MUTATING,
+    )
+
+
+def make_asset_update_tool(update_fn: Callable[..., Asset]) -> ToolSpec:
+    """Option 2: an LLM-proposable, approval-gated tool to correct an existing
+    ssh-host's connection fields (``host``/``port``/``user``/``key_ref``) without
+    re-onboarding — the fix for a rotated key or a rebuilt host that changed IP.
+
+    ``update_fn`` is a registry's ``update_connection`` (in-memory or DB-backed);
+    it preserves the asset's authorization. The intent targets the asset itself,
+    so the dispatcher's authorization check enforces that only an already-
+    registered, authorized asset can be updated. Dispatched under the ONBOARD
+    action class (approval-gated), capability MUTATING. Only a ``key_ref`` that
+    resolves in the vault is accepted — the key value is never handled here."""
+
+    _FIELDS = ("host", "port", "user", "key_ref")
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        changes = {k: params[k] for k in _FIELDS
+                   if k in params and params[k] is not None}
+        if not changes:
+            return ToolResult(ok=False, tool=ASSET_UPDATE_TOOL,
+                              summary="no connection fields to update "
+                                      "(provide host, port, user, and/or key_ref)")
+        if "key_ref" in changes and not resolve_secret(changes["key_ref"]):
+            return ToolResult(ok=False, tool=ASSET_UPDATE_TOOL,
+                              summary=f"key_ref not found in vault: {changes['key_ref']}",
+                              data={"key_ref": changes["key_ref"]})
+        try:
+            asset = update_fn(params["asset_id"], **changes)
+        except (KeyError, ValueError) as exc:
+            return ToolResult(ok=False, tool=ASSET_UPDATE_TOOL, summary=str(exc))
+        conn = asset.connection
+        return ToolResult(
+            ok=True, tool=ASSET_UPDATE_TOOL,
+            summary=f"updated connection for {asset.asset_id} "
+                    f"({conn.user}@{conn.host}:{conn.port})",
+            data={"asset_id": asset.asset_id, "host": conn.host, "port": conn.port,
+                  "user": conn.user, "key_ref": conn.key_ref,
+                  "changed": sorted(changes)},
+        )
+
+    return ToolSpec(
+        name=ASSET_UPDATE_TOOL,
+        schema={
+            "type": "object",
+            "required": ["asset_id"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "host": {"type": "string"},
+                "port": {"type": "integer"},
+                "user": {"type": "string"},
+                "key_ref": {"type": "string"},    # vault ref only; never the key
             },
         },
         executor=_execute,

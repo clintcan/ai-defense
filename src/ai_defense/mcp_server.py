@@ -138,6 +138,26 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "update_asset",
+        "description": "Correct an already-registered ssh-host's connection info "
+                       "(host/port/user/key_ref) without re-onboarding — e.g. a rotated "
+                       "key or a rebuilt host that changed IP. Preserves the asset's "
+                       "authorization. Approval-gated: returns a pending change_set_id "
+                       "until a human approves, then call again to apply. key_ref must "
+                       "already resolve in the vault (never the key itself).",
+        "inputSchema": {
+            "type": "object",
+            "required": ["asset_id"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "host": {"type": "string"},
+                "port": {"type": "integer"},
+                "user": {"type": "string"},
+                "key_ref": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "cloud_regions",
         "description": "List the regions available to a registered cloud account "
                        "(EC2 enabled regions + Lightsail regions). Read-only.",
@@ -286,6 +306,16 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
             res = engine.onboard_cloud_account(**args)
             return _tool_result_json(res)
 
+        if name == "update_asset":
+            res = engine.update_asset_connection(
+                args["asset_id"], host=args.get("host"), port=args.get("port"),
+                user=args.get("user"), key_ref=args.get("key_ref"))
+            out = _tool_result_json(res)
+            if res.data.get("approval_state") == "pending":
+                out["change_set_id"] = res.data.get("change_set_id")
+                out["next"] = "ask the operator to approve, then call update_asset again"
+            return out
+
         if name == "cloud_regions":
             return _tool_result_json(engine.cloud_regions(args["account_id"]))
 
@@ -416,6 +446,12 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "credential_ref": credential_ref, "owner": owner,
             "environment": environment, "granted_by": granted_by, "provider": provider})
 
+    def update_asset(asset_id: str, host: str | None = None, port: int | None = None,
+                     user: str | None = None, key_ref: str | None = None) -> dict:
+        return handle_call(engine, "update_asset", {
+            "asset_id": asset_id, "host": host, "port": port, "user": user,
+            "key_ref": key_ref})
+
     def cloud_regions(account_id: str) -> dict:
         return handle_call(engine, "cloud_regions", {"account_id": account_id})
 
@@ -432,8 +468,8 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate,
-               approve_change, audit_tail, onboard_cloud_account, cloud_regions,
-               cloud_discover, cloud_patch_state, cloud_remediate):
+               approve_change, audit_tail, onboard_cloud_account, update_asset,
+               cloud_regions, cloud_discover, cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

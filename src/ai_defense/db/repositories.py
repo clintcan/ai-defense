@@ -65,6 +65,32 @@ class AssetRepository:
             ))
             s.commit()
 
+    def update_connection(self, asset_id: str, *, host: str | None = None,
+                          port: int | None = None, user: str | None = None,
+                          key_ref: str | None = None) -> Asset:
+        """Update only an ssh-host's connection columns, leaving its authorization
+        rows untouched (unlike ``save``, which appends one — a correction must not
+        re-sign the attestation). Only the fields passed are changed. Raises if the
+        asset is unknown or has no connection (i.e. is not an ssh-host)."""
+        with self._sf() as s:
+            row = s.get(AssetRow, asset_id)
+            if row is None or not row.authorizations:
+                raise KeyError(f"asset not registered: {asset_id}")
+            if row.conn_host is None:
+                raise ValueError(
+                    f"asset has no connection to update (not an ssh-host): {asset_id}")
+            if host is not None:
+                row.conn_host = host
+            if port is not None:
+                row.conn_port = port
+            if user is not None:
+                row.conn_user = user
+            if key_ref is not None:
+                row.conn_key_ref = key_ref
+            asset = _to_asset(row)
+            s.commit()
+            return asset
+
     def get(self, asset_id: str) -> Asset | None:
         with self._sf() as s:
             row = s.get(AssetRow, asset_id)
@@ -95,6 +121,9 @@ class PersistentAssetRegistry:
 
     def register(self, asset: Asset) -> None:
         self._repo.save(asset)
+
+    def update_connection(self, asset_id: str, **fields) -> Asset:
+        return self._repo.update_connection(asset_id, **fields)
 
     def get(self, asset_id: str) -> Asset | None:
         return self._repo.get(asset_id)

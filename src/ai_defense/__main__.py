@@ -5,6 +5,7 @@ Subcommands:
   mcp           Run the MCP server over stdio.
   report        Scan asset(s) and write vulnerability reports to local files.
   bulk-onboard  Register discovered cloud instances as ssh-host assets (operator).
+  update-asset  Correct an ssh-host's connection info (operator; preserves attestation).
   pending       List approval change-sets in a DB.
   approve       Approve a pending change-set.
 """
@@ -161,6 +162,29 @@ def _run_bulk_onboard(args) -> int:
     return 0
 
 
+def _run_update_asset(args) -> int:
+    from .db import init_db
+    from .db.repositories import AssetRepository
+    from .onboarding import update_ssh_connection
+
+    fields = {k: v for k, v in
+              {"host": args.host, "port": args.port, "user": args.user,
+               "key_ref": args.key_ref}.items() if v is not None}
+    if not fields:
+        print("nothing to update — pass at least one of --host/--port/--user/--key-ref")
+        return 1
+    repo = AssetRepository(init_db(args.db))
+    try:
+        asset = update_ssh_connection(repo, args.asset_id, **fields)
+    except (KeyError, ValueError) as exc:
+        print(f"error: {exc}")
+        return 1
+    conn = asset.connection
+    print(f"updated {asset.asset_id} -> {conn.user}@{conn.host}:{conn.port} "
+          f"key_ref={conn.key_ref} (changed: {', '.join(sorted(fields))})")
+    return 0
+
+
 def _run_pending(db: str) -> int:
     from .db import init_db
     from .db.repositories import ApprovalRepository
@@ -234,6 +258,18 @@ def main(argv: list[str] | None = None) -> int:
     p_bulk.add_argument("--dry-run", action="store_true", help="preview without writing")
     _add_engine_args(p_bulk)
 
+    p_update = sub.add_parser(
+        "update-asset",
+        help="correct an ssh-host's connection info (host/port/user/key_ref) without "
+             "re-onboarding; preserves the authorization/attestation")
+    p_update.add_argument("--db", required=True, help="DB URL the asset is registered in")
+    p_update.add_argument("--asset-id", required=True)
+    p_update.add_argument("--host", default=None, help="new address (IP/DNS)")
+    p_update.add_argument("--port", type=int, default=None)
+    p_update.add_argument("--user", default=None, help="new SSH login user")
+    p_update.add_argument("--key-ref", default=None,
+                          help="new vault key reference (key already stored in the vault)")
+
     p_pending = sub.add_parser("pending", help="list approval change-sets in a DB")
     p_pending.add_argument("--db", required=True)
 
@@ -252,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_report(args)
     if args.command == "bulk-onboard":
         return _run_bulk_onboard(args)
+    if args.command == "update-asset":
+        return _run_update_asset(args)
     if args.command == "pending":
         return _run_pending(args.db)
     if args.command == "approve":

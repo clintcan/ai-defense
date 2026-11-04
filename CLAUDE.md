@@ -94,6 +94,22 @@ command *that would run*, never the secrets behind it.
     must **target a pre-registered control-plane asset**, so the "all targets
     authorized" invariant holds — the model cannot bootstrap its own authority —
     and it passes the approval gate before anything is written.
+- **Correcting a registered asset is not re-onboarding.** An ssh-host's
+  connection details drift — a key is rotated, a host is rebuilt and gets a new
+  address or host key, a login was onboarded wrong. Both paths can fix just the
+  connection without disturbing the trust root:
+  - *Operator (out-of-band):* the `update-asset` CLI
+    (`onboarding.update_ssh_connection`).
+  - *LLM-proposed (approval-gated):* the `asset.update_connection` tool
+    (capability MUTATING, `ONBOARD` action class). Unlike registration it targets
+    **the asset itself**, so the dispatcher's authorization check enforces that
+    only an already-registered, authorized asset can be updated.
+  Both change only `host`/`port`/`user`/`key_ref` and **preserve the existing
+  authorization/attestation** — a correction is not a re-attestation, and the DB
+  update touches no authorization row. A new `key_ref` must resolve in the vault
+  (verified, never handled). Identity fields (owner/environment) and the
+  attestation itself are deliberately not updatable this way; changing those is a
+  re-onboarding.
 
 ### 2. Secrets vault (credentials never touch the LLM)
 - Backed by a real secrets manager (HashiCorp Vault / AWS Secrets Manager /

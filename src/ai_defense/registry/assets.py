@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 
@@ -51,6 +51,25 @@ class AssetRegistry:
 
     def register(self, asset: Asset) -> None:
         self._assets[asset.asset_id] = asset
+
+    def update_connection(self, asset_id: str, *, host: str | None = None,
+                          port: int | None = None, user: str | None = None,
+                          key_ref: str | None = None) -> Asset:
+        """Change an existing ssh-host's connection fields in place, preserving
+        its authorization (the attestation is untouched — this is a correction,
+        not a re-onboarding). Only the fields passed are changed. Raises if the
+        asset is not registered or has no connection (i.e. is not an ssh-host)."""
+        asset = self._assets.get(asset_id)
+        if asset is None:
+            raise KeyError(f"asset not registered: {asset_id}")
+        if asset.connection is None:
+            raise ValueError(f"asset has no connection to update (not an ssh-host): {asset_id}")
+        fields = {k: v for k, v in
+                  {"host": host, "port": port, "user": user, "key_ref": key_ref}.items()
+                  if v is not None}
+        updated = replace(asset, connection=replace(asset.connection, **fields))
+        self._assets[asset_id] = updated
+        return updated
 
     def get(self, asset_id: str) -> Asset | None:
         return self._assets.get(asset_id)

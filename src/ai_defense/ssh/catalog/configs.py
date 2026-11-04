@@ -23,6 +23,7 @@ ALLOWED_DROPIN_DIRS: tuple[str, ...] = (
     "/etc/ssh/sshd_config.d/",
     "/etc/security/limits.d/",
     "/etc/nginx/conf.d/",       # included inside nginx's http{} block
+    "/etc/php/8.1/fpm/conf.d/", # Ubuntu-packaged PHP-FPM (22.04's default 8.1)
 )
 
 
@@ -87,6 +88,7 @@ class ConfigBlockRemove:
 _MPTCP_PATH = "/etc/sysctl.d/80-ai-defense-mptcp.conf"
 _SSHD = "/etc/ssh/sshd_config"
 _NGINX_HTTP2_PATH = "/etc/nginx/conf.d/99-ai-defense-http2.conf"
+_PHP_FPM_HARDEN_PATH = "/etc/php/8.1/fpm/conf.d/99-ai-defense-hardening.ini"
 
 # Allowlisted config actions, keyed by name. A mitigation's template /
 # rollback_template may reference one of these (apply / reverse).
@@ -134,6 +136,25 @@ CONFIG_ACTIONS: dict[str, DropInWrite | DropInRemove] = {
         name="config.nginx_http2_rapidreset.remove",
         path=_NGINX_HTTP2_PATH,
         reload=("sudo", "-n", "systemctl", "reload", "nginx"),
+    ),
+    # PHP "session upload progress" is abusable in LFI->RCE (an attacker seeds
+    # attacker-controlled bytes into a predictable session file, then includes it).
+    # Turning it off is a safe hardening — it changes no application behaviour,
+    # unlike disable_functions. PHP_INI_PERDIR, so it lives in a conf.d .ini.
+    # Ubuntu-packaged PHP-FPM only (path/version-specific); on another layout the
+    # `tee`/validate fails and nothing is applied.
+    "config.php_disable_upload_progress": DropInWrite(
+        name="config.php_disable_upload_progress",
+        path=_PHP_FPM_HARDEN_PATH,
+        content="; AI Defense: close the session-upload-progress LFI->RCE vector\n"
+                "session.upload_progress.enabled = Off\n",
+        validate=("sudo", "-n", "php-fpm8.1", "-t"),
+        reload=("sudo", "-n", "systemctl", "reload", "php8.1-fpm"),
+    ),
+    "config.php_disable_upload_progress.remove": DropInRemove(
+        name="config.php_disable_upload_progress.remove",
+        path=_PHP_FPM_HARDEN_PATH,
+        reload=("sudo", "-n", "systemctl", "reload", "php8.1-fpm"),
     ),
 }
 

@@ -238,7 +238,9 @@ record — and internal error text is never surfaced to the planner.
   dry-runs / validates first and records a rollback (CVE-2021-4034/PwnKit strips
   the setuid bit from `/usr/bin/pkexec`; the MPTCP sample writes a sysctl drop-in;
   the HTTP/2 Rapid Reset sample, CVE-2023-44487, writes an nginx `conf.d` drop-in
-  that `nginx -t` validates before reload). Use it where the vendor patch can't be
+  that `nginx -t` validates before reload; the PHP sample turns off
+  `session.upload_progress` — the safe, non-app-breaking fix for the LFI→RCE
+  session vector). Use it where the vendor patch can't be
   installed (an EOL OS without ESM); an uncatalogued CVE escalates to a human
   instead. Backing a mitigation out — once the vendor patch lands, or to undo a
   workaround — is the separate approval-gated **`revert_mitigation`** tool, which

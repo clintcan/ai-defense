@@ -1,0 +1,24 @@
+# PHP session upload progress — the feature behind the classic "LFI to RCE via
+# PHP sessions" technique: an attacker uses PHP_SESSION_UPLOAD_PROGRESS to seed
+# attacker-controlled bytes into a predictable session file, then triggers a Local
+# File Inclusion to execute it. Turning it off closes that vector and — unlike
+# disable_functions — changes no legitimate application behaviour, so it's the
+# *safe* PHP hardening. Keyed under a descriptive hardening id (no single CVE).
+# Run it with:  mitigate <host> PHP-SESSION-UPLOAD-PROGRESS
+#               revert_mitigation <host> PHP-SESSION-UPLOAD-PROGRESS
+#
+# Both actions are allowlisted config actions in the reviewed catalog
+# (ssh/catalog/configs.py); a file may reference one but can't define a new one.
+# Targets the Ubuntu-packaged PHP-FPM layout (/etc/php/8.1/fpm/conf.d). On a host
+# with a different version/SAPI (Apache mod_php, Bitnami, PHP 8.3) the write or
+# `php-fpm8.1 -t` validation fails and nothing is applied — ask for that variant.
+- id: php-disable-session-upload-progress
+  cves: [PHP-SESSION-UPLOAD-PROGRESS]
+  title: Disable PHP session.upload_progress (LFI->RCE hardening)
+  source_ref: https://www.php.net/manual/en/session.configuration.php#ini.session.upload-progress.enabled
+  template: config.php_disable_upload_progress
+  rollback_template: config.php_disable_upload_progress.remove
+  description: >-
+    write session.upload_progress.enabled=Off to a PHP-FPM conf.d drop-in, validate
+    with `php-fpm8.1 -t`, then reload php8.1-fpm; reverse removes the drop-in and
+    reloads. Safe hardening — it does not alter application behaviour.

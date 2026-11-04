@@ -239,6 +239,33 @@ def test_engine_revert_mitigation_reverses_a_config_dropin():
     assert done["data"]["rollback"]["payload"]["rollback_template"] == "config.sysctl_mptcp_off"
 
 
+def test_php_upload_progress_dropin_writes_safe_setting_and_validates():
+    tp = _T()
+    out = ConfigExecutor(SSHExecutor(tp)).apply(
+        CONFIG_ACTIONS["config.php_disable_upload_progress"], host="h", key="k", user="ubuntu")
+    assert out.applied
+    tee = next(c for c in tp.calls if c[0][:3] == ("sudo", "-n", "tee"))
+    assert "session.upload_progress.enabled = Off" in tee[1]
+    argvs = _argvs(tp)
+    assert any(a[:4] == ("sudo", "-n", "php-fpm8.1", "-t") for a in argvs)      # validated
+    assert any(a[:5] == ("sudo", "-n", "systemctl", "reload", "php8.1-fpm") for a in argvs)
+
+
+def test_engine_mitigate_and_revert_php_upload_progress():
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    eng.registry.register(_host("hp"))
+    cve = "PHP-SESSION-UPLOAD-PROGRESS"
+    p = eng.mitigate("hp", cve)
+    assert p.data["approval_state"] == "pending"
+    eng.approve(p.data["change_set_id"])
+    assert handle_call(eng, "mitigate", {"asset_id": "hp", "cve": cve})["ok"] is True
+    r = eng.revert_mitigation("hp", cve)
+    assert r.data["approval_state"] == "pending"
+    eng.approve(r.data["change_set_id"])
+    done = handle_call(eng, "revert_mitigation", {"asset_id": "hp", "cve": cve})
+    assert done["ok"] is True and done["data"]["reverse"] is True
+
+
 def test_revert_is_a_distinct_approval_from_apply():
     # reverse=True changes the change-set id, so reverting needs its own approval —
     # approving the apply does not silently also authorize the revert.

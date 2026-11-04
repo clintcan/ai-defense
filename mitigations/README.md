@@ -50,6 +50,7 @@ mapping with a top-level `mitigations:` list. Fields:
 | `mptcp.yaml` | Disable Multipath TCP persistently | config drop-in `config.sysctl_mptcp_off` |
 | `sshd-x11.yaml` | sshd: disable X11 forwarding (no conf.d) | in-place block edit `config.sshd_disable_x11` |
 | `http2-rapid-reset.yaml` | CVE-2023-44487 (HTTP/2 Rapid Reset): cap nginx concurrent streams | config drop-in `config.nginx_http2_rapidreset` |
+| `php-session-upload-progress.yaml` | Disable PHP `session.upload_progress` (LFI→RCE hardening) | config drop-in `config.php_disable_upload_progress` |
 
 A `template`/`rollback_template` may name a **command** (a fixed argv in
 `ssh/catalog/`) or a **config action** (a managed drop-in in

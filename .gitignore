@@ -29,3 +29,5 @@ node_modules/
 *.egg-info/
 build/
 dist/
+# local MCP client config (machine-specific absolute paths; not shared)
+opencode.jsonc

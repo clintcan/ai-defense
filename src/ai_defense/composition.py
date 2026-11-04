@@ -64,6 +64,7 @@ from .ssh.config_exec import ConfigExecutor
 from .ssh.executor import SSHExecutor
 from .ssh.tools import (
     make_mitigation_tool,
+    make_os_upgrade_tool,
     make_security_update_tool,
     registry_connection_resolver,
 )
@@ -73,6 +74,7 @@ from .toolset.policy import PolicyEngine
 from .toolset.ratelimit import RateLimiter
 from .toolset.registry import ToolRegistry
 from .upgrade.preflight import OsUpgradePreflight, OsUpgradeReport
+from .upgrade.workflow import UPGRADE_PENDING, UPGRADED, OsUpgradeResult, OsUpgradeWorkflow
 from .vault.vault import Vault
 from .vuln.feeds import Advisory, AdvisoryFeed, StaticAdvisoryFeed
 from .vuln.mitigations import MitigationRegistry, load_mitigations
@@ -118,7 +120,11 @@ class Engine:
     feed: AdvisoryFeed
     preflighter: OsUpgradePreflight
     mitigations: MitigationRegistry
+    os_workflow: OsUpgradeWorkflow
     clock: Callable[[], datetime] = _utcnow
+    # Set true once a canary OS upgrade comes back healthy; unlocks the
+    # os_upgrade_fleet canary->fleet precondition for this engine session.
+    _os_canary_ok: bool = False
 
     # -- inventory --------------------------------------------------------
     def list_assets(self) -> list[Asset]:
@@ -335,6 +341,28 @@ class Engine:
             targets=[asset_id], action_class=ActionClass.MITIGATE_CANARY,
             reason=f"{verb} {cve_id} on {asset_id}: {m.title}", source_ref=m.source_ref))
 
+    def os_upgrade(self, asset_id: str, *, canary: bool = True,
+                   existing_snapshot_ids: list[str] | None = None) -> OsUpgradeResult:
+        """Drive the strongly-gated in-place OS upgrade of one host (CLAUDE.md 6c):
+        preflight-gated (must be READY), a mandatory pre-upgrade snapshot, a
+        human-approved upgrade+reboot (``os_upgrade_canary`` / ``_fleet``), then a
+        reconnect → health → re-scan check that HALTS and keeps the snapshot as the
+        restore point on failure — an in-place dist-upgrade can't be auto-reverted.
+
+        Canary by default. The fleet class only clears its canary→fleet
+        precondition once a canary has come back healthy in this engine session
+        (tracked in-memory, not persisted). Returns a pending change_set_id until
+        approved; re-call with the returned ``existing_snapshot_ids`` to apply
+        without re-snapshotting."""
+        result = self.os_workflow.run(asset_id, canary=canary,
+                                      existing_snapshot_ids=existing_snapshot_ids)
+        if canary and result.status == UPGRADED:
+            self._os_canary_ok = True
+        if (not canary and result.status == UPGRADE_PENDING
+                and self._os_canary_ok and result.change_set_id):
+            self.approvals.mark_precondition_met(result.change_set_id)
+        return result
+
     # -- approval / audit -------------------------------------------------
     def approve(self, change_set_id: str, approver: str = "operator") -> ApprovalState:
         return self.approvals.decide(change_set_id, approver, approve=True, now=self.clock())
@@ -482,6 +510,7 @@ def build_engine(
                                         mitigations=mitigations.by_id,
                                         config_executor=ConfigExecutor(ssh_executor),
                                         config_actions=PRIMITIVE_ACTIONS))
+    tools.register(make_os_upgrade_tool(ssh_executor, conn_resolver))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))
@@ -509,14 +538,18 @@ def build_engine(
         from .vuln.kev import KevCatalog, KevEnrichedFeed
         feed = KevEnrichedFeed(feed, kev_catalog or KevCatalog())
 
+    scanner = AuthenticatedScanner(host_inspector)
+    preflighter = OsUpgradePreflight()
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
-        scanner=AuthenticatedScanner(host_inspector),
+        scanner=scanner,
         planner=RemediationPlanner(),
         workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
         feed=feed,
-        preflighter=OsUpgradePreflight(),
+        preflighter=preflighter,
         mitigations=mitigations,
+        os_workflow=OsUpgradeWorkflow(dispatcher, scanner, preflighter,
+                                      credential_ref_for=lambda _a: "aws/demo"),
         clock=clock,
     )
 

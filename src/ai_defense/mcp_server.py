@@ -162,6 +162,26 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "os_upgrade",
+        "description": "Drive the strongly-gated in-place OS release upgrade of one host "
+                       "(for an EOL OS where patching isn't enough). Preflight-gated (must be "
+                       "READY), takes a mandatory snapshot first, then a human-approved "
+                       "upgrade+reboot, then confirms the host comes back on the target release "
+                       "— halting and keeping the snapshot as the restore point if it doesn't. "
+                       "Canary by default (2 approvals); set canary=false for the fleet (only "
+                       "after a healthy canary). Returns a pending change_set_id until approved, "
+                       "then call again with the returned snapshot_ids to apply.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["asset_id"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "canary": {"type": "boolean"},
+                "snapshot_ids": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
         "name": "revert_mitigation",
         "description": "Undo a previously applied mitigation by running its recorded "
                        "rollback action (restore the pkexec setuid bit, remove the "
@@ -374,6 +394,25 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                 out["next"] = "ask the operator to approve, then call revert_mitigation again"
             return out
 
+        if name == "os_upgrade":
+            r = engine.os_upgrade(
+                args["asset_id"], canary=args.get("canary", True),
+                existing_snapshot_ids=args.get("snapshot_ids"))
+            out: dict[str, Any] = {
+                "asset_id": r.asset_id, "status": r.status,
+                "ok": r.status == "upgraded",
+                "preflight_verdict": r.preflight.verdict.value if r.preflight else None,
+                "target_version": r.preflight.target_version if r.preflight else None,
+                "snapshot_ids": r.snapshot_ids,
+                "reconnected": r.reconnected, "post_os": r.post_os,
+                "notes": r.notes,
+            }
+            if r.status == "upgrade_pending":
+                out["change_set_id"] = r.change_set_id
+                out["next"] = ("ask the operator to approve (os_upgrade_canary needs 2), then "
+                               "call os_upgrade again with snapshot_ids to apply")
+            return out
+
         if name == "update_asset":
             res = engine.update_asset_connection(
                 args["asset_id"], host=args.get("host"), port=args.get("port"),
@@ -540,6 +579,11 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def revert_mitigation(asset_id: str, cve: str) -> dict:
         return handle_call(engine, "revert_mitigation", {"asset_id": asset_id, "cve": cve})
 
+    def os_upgrade(asset_id: str, canary: bool = True,
+                   snapshot_ids: list[str] | None = None) -> dict:
+        return handle_call(engine, "os_upgrade", {
+            "asset_id": asset_id, "canary": canary, "snapshot_ids": snapshot_ids})
+
     def update_asset(asset_id: str, host: str | None = None, port: int | None = None,
                      user: str | None = None, key_ref: str | None = None) -> dict:
         return handle_call(engine, "update_asset", {
@@ -562,7 +606,7 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate, mitigate,
-               revert_mitigation, list_mitigations, approve_change, audit_tail,
+               revert_mitigation, os_upgrade, list_mitigations, approve_change, audit_tail,
                onboard_cloud_account, update_asset, cloud_regions, cloud_discover,
                cloud_patch_state, cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])

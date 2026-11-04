@@ -17,13 +17,19 @@ from .ssh.executor import CommandOutput
 # A policy mirroring config/policy.example.yaml, inline so the demo needs no file.
 DEMO_POLICY: dict[str, Any] = {
     "autonomous_action_classes": ["discovery", "scan", "protective"],
-    "blast_radius_caps": {"patch_canary": 3, "patch_fleet": 500},
+    "blast_radius_caps": {"patch_canary": 3, "patch_fleet": 500,
+                          "os_upgrade_canary": 1, "os_upgrade_fleet": 10},
     "rate_limits": {"per_host_changes_per_hour": 5, "fleet_concurrency": 25},
     "approvals": {
         "patch_canary": {"required": 1},
         "patch_fleet": {"required": 2, "after": "canary_health_ok"},
         "mitigate_canary": {"required": 1},
         "mitigate_fleet": {"required": 2, "after": "canary_health_ok"},
+        # OS upgrade is the most disruptive change (reboots), so it is gated
+        # harder: two approvals on the canary, and the fleet only after the
+        # canary comes back healthy.
+        "os_upgrade_canary": {"required": 2},
+        "os_upgrade_fleet": {"required": 2, "after": "canary_health_ok"},
         "cleanup": {"required": 1},
         "onboard": {"required": 1},
     },

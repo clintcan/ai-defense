@@ -25,6 +25,7 @@ class PrimitiveKind(str, Enum):
     SERVICE = "service"
     FIREWALL_RULE = "firewall_rule"
     FILE_PERM = "file_perm"        # e.g. strip a setuid bit (PwnKit pkexec workaround)
+    OS_UPGRADE = "os_upgrade"      # in-place release upgrade; rollback = restore snapshot
 
 
 # --- config edits --------------------------------------------------------

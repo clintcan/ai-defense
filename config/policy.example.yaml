@@ -12,6 +12,8 @@ blast_radius_caps:
   patch_canary: 3
   mitigate_fleet: 500
   patch_fleet: 500
+  os_upgrade_canary: 1     # one host at a time on the canary
+  os_upgrade_fleet: 10
 
 rate_limits:
   per_host_changes_per_hour: 2
@@ -22,6 +24,8 @@ approvals:
   patch_fleet:     { required: 1, after: canary_health_ok }
   mitigate_canary: { required: 1 }
   mitigate_fleet:  { required: 1, after: canary_health_ok }
+  os_upgrade_canary: { required: 2 }                        # reboots; gated harder
+  os_upgrade_fleet:  { required: 2, after: canary_health_ok }
   emergency:      { required: 2 }   # outside window / KEV emergency
   cleanup:        { required: 1 }   # deleting a pre-change snapshot once the fix is stable
   onboard:        { required: 1 }   # registering a new asset into the authorization ledger

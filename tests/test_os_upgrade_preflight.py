@@ -55,7 +55,7 @@ def test_ready_when_target_exists_and_no_blockers():
     assert r.path == ["20.04", "22.04", "24.04"]
     assert r.blockers == []
     assert any("Ubuntu Pro" in n or "extended" in n for n in r.notes)
-    assert any("not enabled yet" in n for n in r.notes)   # no change made
+    assert any("makes no change" in n for n in r.notes)   # preflight is read-only
 
 
 def test_blocked_lists_every_probe_blocker():

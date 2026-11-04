@@ -26,6 +26,7 @@ from .hardening import PrimitiveKind, RollbackAction
 
 SECURITY_UPDATE_TOOL = "patch.apply_security_update"
 MITIGATION_TOOL = "mitigation.apply_hardening"
+OS_UPGRADE_TOOL = "os.release_upgrade"
 
 ConnectionResolver = Callable[[str], ConnectionInfo]
 
@@ -241,6 +242,95 @@ def make_mitigation_tool(
                 "asset_id": {"type": "string"},
                 "mitigation_id": {"type": "string"},
                 "reverse": {"type": "boolean"},   # run the recorded rollback action
+            },
+        },
+        executor=_execute,
+        capability=ToolCapability.MUTATING,
+    )
+
+
+def make_os_upgrade_tool(
+    executor: SSHExecutor, connection_resolver: ConnectionResolver,
+) -> ToolSpec:
+    """Build the ``os.release_upgrade`` tool (capability=MUTATING).
+
+    The mutating core of the OS_UPGRADE workflow: drive an in-place Ubuntu release
+    upgrade and reboot into it, as one approved action. Params: ``asset_id`` (conn
+    resolved from the registry), optional ``target_version`` (for the summary and
+    the workflow's post-reboot health check) and ``snapshot_id`` (the mandatory
+    pre-upgrade snapshot, recorded as the rollback — a dist-upgrade can't be undone
+    in place, so restoring the snapshot IS the rollback).
+
+    Sequence: ``do-release-upgrade -c`` (dry-run: is an upgrade available? changes
+    nothing) → ``do-release-upgrade`` → ``systemctl reboot``. The reboot drops the
+    SSH session; that is expected and counts as "reboot issued" — the workflow then
+    polls for the host to come back. Post-reboot reconnect/health/re-scan are
+    read-only and live in the workflow, not here."""
+
+    def _execute(params: dict, *, resolve_secret) -> ToolResult:
+        asset_id = params["asset_id"]
+        target = params.get("target_version")
+        snapshot_id = params.get("snapshot_id")
+        conn = connection_resolver(asset_id)
+        key = resolve_secret(conn.key_ref)
+
+        rollback = RollbackAction(
+            kind=PrimitiveKind.OS_UPGRADE,
+            description=(f"restore pre-upgrade snapshot {snapshot_id or '<none>'} on "
+                        f"{asset_id} (an in-place dist-upgrade cannot be reverted in place)"),
+            payload={"asset_id": asset_id, "snapshot_id": snapshot_id},
+        )
+        rb_json = {"kind": rollback.kind.value, "description": rollback.description,
+                   "payload": rollback.payload}
+
+        # 1. In-place release upgrade (dry-run `-c` first: is a new release available?).
+        up = executor.run_template(conn.host, "os.do_release_upgrade", {}, key=key,
+                                   user=conn.user, port=conn.port, dry_run_first=True)
+        if not up.applied:
+            return ToolResult(
+                ok=False, tool=OS_UPGRADE_TOOL,
+                summary=f"release upgrade not applied on {asset_id}: {up.blocked_reason}",
+                data={"blocked_reason": up.blocked_reason,
+                      "dry_run_exit": up.dry_run.exit_code if up.dry_run else None,
+                      "rollback": rb_json},
+                resolved_command=up.resolved_command)
+        res = up.result
+        if res is None or res.exit_code != 0:
+            code = res.exit_code if res else "?"
+            return ToolResult(
+                ok=False, tool=OS_UPGRADE_TOOL,
+                summary=f"release upgrade command failed on {asset_id} (exit {code})",
+                data={"exit_code": res.exit_code if res else None,
+                      "stderr": res.stderr if res else "", "rollback": rb_json},
+                resolved_command=up.resolved_command)
+
+        # 2. Reboot into the upgraded system. A dropped SSH session during reboot
+        #    is expected and counts as success — the workflow confirms via reconnect.
+        try:
+            rb = executor.run_template(conn.host, "os.reboot", {}, key=key,
+                                       user=conn.user, port=conn.port, dry_run_first=False)
+            reboot_issued = (not rb.applied) or (rb.result is None) or (rb.result.exit_code == 0)
+        except Exception:  # noqa: BLE001 - reboot severs the connection; that's success
+            reboot_issued = True
+
+        return ToolResult(
+            ok=True, tool=OS_UPGRADE_TOOL,
+            summary=(f"release upgrade applied on {asset_id}; reboot issued"
+                     + (f" (target {target})" if target else "")),
+            data={"asset_id": asset_id, "target_version": target,
+                  "upgrade_exit": res.exit_code, "reboot_issued": reboot_issued,
+                  "rollback": rb_json},
+            resolved_command=up.resolved_command)
+
+    return ToolSpec(
+        name=OS_UPGRADE_TOOL,
+        schema={
+            "type": "object",
+            "required": ["asset_id"],
+            "properties": {
+                "asset_id": {"type": "string"},
+                "target_version": {"type": "string"},
+                "snapshot_id": {"type": "string"},
             },
         },
         executor=_execute,

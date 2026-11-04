@@ -289,7 +289,7 @@ A patch remediation is sequenced so it is reversible by default:
   approval-gated **CLEANUP** action the operator invokes only once the fix is
   confirmed stable — a safety backup is never destroyed silently.
 
-### 6c. OS-upgrade preflight (read-only) & the OS_UPGRADE workflow (future)
+### 6c. OS-upgrade preflight (read-only) & the OS_UPGRADE workflow
 When a host runs an **end-of-life or ESM-only OS**, many CVEs have no fix in the
 normal stream and the real remediation is moving to a supported release — so the
 vuln planner escalates them for a human decision. The **upgrade preflight** turns
@@ -308,11 +308,20 @@ host.
   **blockers**, and a verdict (`READY` / `BLOCKED` / `CURRENT` / `UNKNOWN`).
   Exposed as the `upgrade_preflight` MCP tool.
 - **Driving** the upgrade is a separate, **more strongly gated** `OS_UPGRADE`
-  workflow (not yet enabled): mandatory snapshot/AMI first, canary→fleet, a
-  reboot → reconnect → health-recheck state machine with timed auto-revert, and a
-  post-upgrade re-scan. For cloud images (e.g. Lightsail) the vendor-preferred
-  path may be rebuild-from-blueprint + migrate rather than in-place. Until that
-  workflow lands, the preflight only advises.
+  workflow (`upgrade/workflow.py`, the `os_upgrade` tool / `Engine.os_upgrade`),
+  v1 **in-place, Ubuntu-first** (`do-release-upgrade`). The state machine:
+  preflight gate (must be `READY`) → **mandatory snapshot** (PROTECTIVE,
+  autonomous; never upgrade without a restore point) → human-approved
+  **upgrade + reboot** as one reviewed action (`os.release_upgrade`, dry-run
+  `do-release-upgrade -c` first) under `os_upgrade_canary` (**two approvals**) /
+  `os_upgrade_fleet` (two, `after: canary_health_ok`, blast cap small) → **reconnect
+  poll → health check** (back on the target `VERSION_ID`?) → **post-upgrade
+  re-scan**. On failure it **halts and keeps the snapshot as the restore point**
+  (operator decision 2026-11-05): an in-place dist-upgrade can't be auto-reverted,
+  so there is no silent rollback — a human restores the snapshot. For cloud images
+  (e.g. Lightsail) the vendor-preferred path may be rebuild-from-blueprint +
+  migrate rather than in-place; that stays a preflight recommendation, not
+  automated. Debian in-place is a follow-up.
 
 ### 6a. Managed configuration primitives
 Config/module/service remediations are expressed as declarative, reviewable
@@ -430,6 +439,8 @@ emits four deliverables:
 | Protective (snapshot, backup) | Allowed autonomously before a gated change |
 | Mitigation / patch on **canary** | Requires human approval |
 | Mitigation / patch on **fleet** | Requires human approval (stronger, after canary passes) |
+| **OS upgrade** on **canary** | Requires human approval (elevated: two approvers) |
+| **OS upgrade** on **fleet** | Two approvers, only after a canary comes back healthy |
 | Anything on denylist | Blocked unconditionally |
 | Emergency change outside window | Requires elevated/second approval |
 

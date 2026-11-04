@@ -335,6 +335,14 @@ Everything except the last two rows is read-only and safe to run anytime. Only
 patching and mitigating change a server, and both need your approval — covered
 next.
 
+If a server is on an **end-of-life** operating system (no more security fixes),
+patching isn't enough — it needs an **OS upgrade**. After the preflight says a
+host is *ready*, you can say *"upgrade the OS on web-01"*. That's the most heavily
+guarded action AI Defense takes: it snapshots first, needs **two** approvals, and
+if the server doesn't come back healthy after the reboot it **stops and keeps the
+snapshot** for you to restore. See [§11](#11-when-a-patch-isnt-available--mitigations)
+for how a stuck upgrade is handled.
+
 ---
 
 ## 10. Step 7 — Approving changes
@@ -485,6 +493,10 @@ problem to read).
   not just a patch.
 - **Preflight** — a read-only check of whether a server is ready for an OS
   upgrade. It only advises; it never upgrades anything.
+- **OS upgrade** — moving an end-of-life server to a supported release (in place,
+  e.g. Ubuntu 18.04 → 20.04). AI Defense's most heavily guarded action: a
+  mandatory snapshot, two approvals, and an automatic **stop-and-keep-the-snapshot**
+  if the server doesn't come back healthy after the reboot.
 - **Mitigation** — an official, documented *workaround* for a flaw you can't
   patch yet (e.g. on an End-of-Life OS). AI Defense applies only cited,
   reviewed ones; each is reversible and meant as a temporary stopgap until the

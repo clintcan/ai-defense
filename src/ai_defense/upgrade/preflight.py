@@ -12,8 +12,8 @@ Given a host's observed state (from the authenticated scanner), it reports:
 It never dispatches an intent, never mutates a host, and never improvises a path
 it cannot cite from the release table. It exists to turn the vuln planner's
 "escalate: OS end-of-life" into a concrete, human-verifiable decision; actually
-*driving* the upgrade is a separate, strongly-gated ``OS_UPGRADE`` workflow that
-is not wired yet (CLAUDE.md 6c).
+*driving* the upgrade is the separate, strongly-gated ``OS_UPGRADE`` workflow
+(``upgrade.workflow`` / the ``os_upgrade`` tool), CLAUDE.md 6c.
 """
 
 from __future__ import annotations
@@ -101,9 +101,11 @@ class OsUpgradePreflight:
         notes.append("If this host is a cloud-managed image (e.g. AWS Lightsail), the "
                      "vendor may recommend rebuilding from a newer blueprint and "
                      "migrating rather than an in-place release upgrade.")
-        notes.append("This is a read-only assessment. Driving the upgrade (snapshot, "
-                     "canary, reboot/reconnect/health-recheck) is the gated OS_UPGRADE "
-                     "workflow, which is not enabled yet — no change has been made.")
+        notes.append("This is a read-only assessment and makes no change. Driving the "
+                     "upgrade (mandatory snapshot, canary->fleet, reboot/reconnect/"
+                     "health-recheck, halt-with-restore-point) is the separate "
+                     "approval-gated OS_UPGRADE workflow — the `os_upgrade` tool — which "
+                     "you invoke explicitly.")
         return OsUpgradeReport(
             asset_id=findings.asset_id, verdict=verdict,
             current_os=current_os, support_status=status,

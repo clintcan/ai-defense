@@ -5,7 +5,8 @@ The MCP server exposes a focused set of tools Claude can call in plain language:
 eligibility), `report` (write Markdown + DefectDojo/generic JSON to local files),
 `remediate`, `mitigate` (apply a cited, reversible workaround), `revert_mitigation`
 (undo one by running its recorded rollback), `list_mitigations` (read-only: what
-`mitigate` can apply), `update_asset` (correct a host's connection without
+`mitigate` can apply), `os_upgrade` (drive a strongly-gated in-place OS release
+upgrade for an EOL host), `update_asset` (correct a host's connection without
 re-onboarding), `approve_change`, `audit_tail`, plus the cloud tools (below). Every call still goes through the dispatcher, so policy,
 authorization, the approval gate, rate limits, redaction, and the audit log all
 apply.
@@ -267,6 +268,22 @@ a file can map a CVE to an existing command, never add a new one. See
 ```bat
 ai-defense mcp --db "..." --ssh-keys "..." --osv --kev --mitigations-dir mitigations
 ```
+
+### Driving an OS upgrade (EOL hosts)
+
+When a host is on an **end-of-life** OS, patching isn't enough — the fix is moving
+to a supported release. After the read-only `upgrade_preflight` reports a host
+`READY`, ask Claude to *"upgrade the OS on `<host>`"* and the **`os_upgrade`**
+workflow drives it, in-place (Ubuntu `do-release-upgrade`), with every rail on:
+it refuses a host that isn't `READY`, takes a **mandatory snapshot first**, runs
+the upgrade+reboot as **one human-approved action** (the canary needs **two**
+approvals), then polls for the host to come back **on the target release**. If it
+doesn't come back healthy, the workflow **halts and keeps the snapshot as the
+restore point** — an in-place upgrade can't be rolled back automatically, so a
+human restores it. It returns a pending change-set; approve it, then ask Claude to
+*"try the upgrade again"* (it reuses the snapshot). The fleet (`canary=false`) only
+unlocks after a canary has come back healthy. For cloud images the vendor may
+prefer rebuild-from-blueprint + migrate; that stays a human decision, not automated.
 
 ## Safeguards that remain in force
 

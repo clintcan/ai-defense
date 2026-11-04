@@ -38,6 +38,7 @@ _ALLOWED_CLASSES: dict[ToolCapability, set[ActionClass]] = {
     ToolCapability.MUTATING: {
         ActionClass.MITIGATE_CANARY, ActionClass.MITIGATE_FLEET,
         ActionClass.PATCH_CANARY, ActionClass.PATCH_FLEET,
+        ActionClass.OS_UPGRADE_CANARY, ActionClass.OS_UPGRADE_FLEET,
         ActionClass.EMERGENCY, ActionClass.CLEANUP, ActionClass.ONBOARD,
     },
 }

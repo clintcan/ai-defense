@@ -22,6 +22,8 @@ class ActionClass(str, Enum):
     MITIGATE_FLEET = "mitigate_fleet"
     PATCH_CANARY = "patch_canary"
     PATCH_FLEET = "patch_fleet"
+    OS_UPGRADE_CANARY = "os_upgrade_canary"   # drive an in-place release upgrade on a canary
+    OS_UPGRADE_FLEET = "os_upgrade_fleet"     # ... then the fleet, after the canary is healthy
     EMERGENCY = "emergency"
     CLEANUP = "cleanup"              # e.g. deleting a pre-change snapshot once stable
     ONBOARD = "onboard"             # register a new asset into the authorization ledger

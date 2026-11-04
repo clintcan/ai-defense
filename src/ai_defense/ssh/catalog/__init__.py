@@ -15,7 +15,7 @@ Public API is unchanged: ``CATALOG``, ``CommandTemplate``, ``render_argv``.
 from __future__ import annotations
 
 from ..hardening import PrimitiveKind
-from . import hardening, packages
+from . import hardening, osupgrade, packages
 from ._template import CommandTemplate, render_argv
 from .configs import (
     ALLOWED_DROPIN_DIRS,
@@ -45,7 +45,8 @@ def _merge(*categories: dict[str, CommandTemplate]) -> dict[str, CommandTemplate
     return catalog
 
 
-CATALOG: dict[str, CommandTemplate] = _merge(packages.TEMPLATES, hardening.TEMPLATES)
+CATALOG: dict[str, CommandTemplate] = _merge(
+    packages.TEMPLATES, hardening.TEMPLATES, osupgrade.TEMPLATES)
 
 
 def _merge_actions(*dicts: dict) -> dict:

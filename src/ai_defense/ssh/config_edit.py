@@ -75,12 +75,22 @@ def codename_present(content: str, codename: str) -> bool:
     return re.search(rf"\b{re.escape(codename)}\b", content) is not None
 
 
+# Releases whose security suite is "<codename>/updates". From bullseye on it is
+# "<codename>-security" (Debian 11 release notes §5.1.4, "Changed security
+# archive layout": https://www.debian.org/releases/bullseye/releasenotes).
+_LEGACY_SECURITY_SUITE = frozenset({"jessie", "stretch", "buster"})
+
+
 def swap_codename(content: str, old: str, new: str) -> str:
-    """Replace every whole-word occurrence of ``old`` with ``new``. A no-op if
-    ``old`` isn't present (covers "already swapped" on a retry) — the caller
-    (``ConfigExecutor``) is responsible for distinguishing that from the
-    genuinely ambiguous case where neither codename appears at all."""
+    """Replace every whole-word occurrence of ``old`` with ``new``, rewriting the
+    security suite ``<old>/updates`` to ``<new>-security`` when ``new`` uses the
+    newer archive layout. A no-op if ``old`` isn't present (covers "already
+    swapped" on a retry) — the caller (``ConfigExecutor``) is responsible for
+    distinguishing that from the genuinely ambiguous case where neither codename
+    appears at all."""
     pattern = re.compile(rf"\b{re.escape(old)}\b")
     if not pattern.search(content):
         return content
+    if new not in _LEGACY_SECURITY_SUITE:
+        content = re.sub(rf"\b{re.escape(old)}/updates\b", f"{new}-security", content)
     return pattern.sub(new, content)

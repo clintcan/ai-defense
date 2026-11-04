@@ -111,10 +111,27 @@ def test_swap_codename_helpers():
     assert codename_present(sources, "buster") and not codename_present(sources, "bullseye")
     swapped = swap_codename(sources, "buster", "bullseye")
     assert "buster" not in swapped and swapped.count("bullseye") == 2
+    # bullseye renamed the security suite: buster/updates -> bullseye-security
+    assert "debian-security bullseye-security main" in swapped
+    assert "bullseye/updates" not in swapped
     assert swap_codename(swapped, "buster", "bullseye") == swapped    # no-op: already swapped
     assert codename_present(swapped, "bullseye") and not codename_present(swapped, "buster")
     # whole-word only: "buster" must not match inside a longer identifier
     assert not codename_present("deb .../oldbusterthing main\n", "buster")
+
+
+def test_swap_codename_security_suite_across_layouts():
+    sec = "deb http://security.debian.org/debian-security {} main\n"
+    # stretch -> buster: buster still uses the old "/updates" layout
+    assert swap_codename(sec.format("stretch/updates"), "stretch", "buster") \
+        == sec.format("buster/updates")
+    # bullseye -> bookworm: already "-security", a plain word swap is right
+    assert swap_codename(sec.format("bullseye-security"), "bullseye", "bookworm") \
+        == sec.format("bookworm-security")
+    # the real db-proxy-1 file: buster-updates/backports are suites, not security
+    real = ("deb http://cdn-aws.deb.debian.org/debian buster-updates main\n"
+            "deb http://cdn-aws.deb.debian.org/debian buster-backports main\n")
+    assert swap_codename(real, "buster", "bullseye") == real.replace("buster", "bullseye")
 
 
 class _EditT:

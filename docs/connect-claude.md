@@ -3,10 +3,12 @@
 The MCP server exposes a focused set of tools Claude can call in plain language:
 `list_assets`, `scan`, `plan`, `upgrade_preflight` (read-only OS-upgrade
 eligibility), `report` (write Markdown + DefectDojo/generic JSON to local files),
-`remediate`, `update_asset` (correct a host's connection without re-onboarding),
-`approve_change`, `audit_tail`, plus the cloud tools (below). Every call still
-goes through the dispatcher, so policy, authorization, the approval gate, rate
-limits, redaction, and the audit log all apply.
+`remediate`, `mitigate` (apply a cited, reversible workaround), `list_mitigations`
+(read-only: what `mitigate` can apply), `update_asset` (correct a host's
+connection without re-onboarding), `approve_change`, `audit_tail`, plus the cloud
+tools (below). Every call still goes through the dispatcher, so policy,
+authorization, the approval gate, rate limits, redaction, and the audit log all
+apply.
 
 > Paths below assume this repo at `C:\path\to\ai_defense` and the
 > `.venv` created by `install.ps1` / `install.sh`. Adjust if yours differ.

@@ -48,7 +48,14 @@ from .registry.assets import Asset, AssetRegistry, Authorization
 from .report import ReportProvenance, build_report, write_report
 from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
-from .ssh.catalog import CATALOG, CONFIG_ACTIONS
+from .ssh.catalog import (
+    CATALOG,
+    CONFIG_ACTIONS,
+    ConfigBlockRemove,
+    ConfigBlockWrite,
+    DropInRemove,
+    DropInWrite,
+)
 from .ssh.config_exec import ConfigExecutor
 from .ssh.executor import SSHExecutor
 from .ssh.tools import (
@@ -71,6 +78,18 @@ from .vuln.workflow import RemediationWorkflow, WorkflowResult
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _mitigation_action_kind(action_name: str) -> str:
+    """Classify the action a mitigation references, for read-only listing."""
+    if action_name in CATALOG:
+        return "command"
+    action = CONFIG_ACTIONS.get(action_name)
+    if isinstance(action, (DropInWrite, DropInRemove)):
+        return "config-dropin"
+    if isinstance(action, (ConfigBlockWrite, ConfigBlockRemove)):
+        return "config-edit"
+    return "unknown"
 
 
 @dataclass
@@ -254,6 +273,22 @@ class Engine:
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:
         return self.workflow.run(item, snapshot=snapshot,
                                  existing_snapshot_ids=existing_snapshot_ids)
+
+    def list_mitigations(self) -> list[dict]:
+        """Read-only: the mitigations currently loaded (built-ins + any folder),
+        each with the CVE(s)/key it covers, the action it runs, that action's kind
+        (command / config-dropin / config-edit), and the advisory it cites — so
+        'what mitigations are enabled?' is answerable without inspecting config."""
+        return sorted(
+            ({
+                "mitigation_id": m.mitigation_id,
+                "cves": list(m.cves),
+                "title": m.title,
+                "source_ref": m.source_ref,
+                "action": m.template,
+                "kind": _mitigation_action_kind(m.template),
+            } for m in self.mitigations.by_id.values()),
+            key=lambda d: d["mitigation_id"])
 
     def mitigate(self, asset_id: str, cve_id: str) -> ToolResult:
         """Propose the published mitigation for a CVE where the vendor patch can't

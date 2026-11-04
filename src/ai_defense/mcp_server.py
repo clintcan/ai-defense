@@ -119,6 +119,14 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "list_mitigations",
+        "description": "List the CVE mitigations currently loaded (built-ins + the "
+                       "mitigations folder): each id, the CVE(s)/key it covers, the "
+                       "action kind (command / config-dropin / config-edit), and its "
+                       "advisory source. Read-only; shows what `mitigate` can apply.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "onboard_cloud_account",
         "description": "Register a cloud account (e.g. AWS) so its instances can be "
                        "managed. Approval-gated; the AWS credential must already be in "
@@ -326,6 +334,9 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                                  "reason": r.payload.get("reason"),
                                  "ts": r.ts.isoformat()} for r in recs]}
 
+        if name == "list_mitigations":
+            return {"mitigations": engine.list_mitigations()}
+
         if name == "onboard_cloud_account":
             res = engine.onboard_cloud_account(**args)
             return _tool_result_json(res)
@@ -488,6 +499,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def audit_tail(n: int = 20) -> dict:
         return handle_call(engine, "audit_tail", {"n": n})
 
+    def list_mitigations() -> dict:
+        return handle_call(engine, "list_mitigations", {})
+
     def onboard_cloud_account(account_id: str, credential_ref: str, owner: str,
                               environment: str, granted_by: str,
                               provider: str = "aws") -> dict:
@@ -520,8 +534,9 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
             "account_id": account_id, "instance_ids": instance_ids, "baseline": baseline})
 
     for fn in (list_assets, scan, plan, upgrade_preflight, report, remediate, mitigate,
-               approve_change, audit_tail, onboard_cloud_account, update_asset,
-               cloud_regions, cloud_discover, cloud_patch_state, cloud_remediate):
+               list_mitigations, approve_change, audit_tail, onboard_cloud_account,
+               update_asset, cloud_regions, cloud_discover, cloud_patch_state,
+               cloud_remediate):
         server.add_tool(fn, name=fn.__name__, description=_DESCRIPTIONS[fn.__name__])
     return server
 

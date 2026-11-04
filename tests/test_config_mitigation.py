@@ -165,6 +165,27 @@ def test_inplace_edit_remove_reverses_the_block():
     assert "X11Forwarding no" not in tp.content and "ai-defense:sshd-x11" not in tp.content
 
 
+def test_list_mitigations_reports_loaded_set_and_kinds():
+    eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
+    rows = handle_call(eng, "list_mitigations", {})["mitigations"]
+    by_id = {r["mitigation_id"]: r for r in rows}
+    # the shipped set, each tagged with the right action kind
+    assert by_id["pwnkit-pkexec-suid"]["kind"] == "command"
+    assert by_id["sack-panic-disable-tcp-sack"]["kind"] == "command"
+    assert by_id["mptcp-disable"]["kind"] == "config-dropin"
+    assert by_id["sshd-disable-x11"]["kind"] == "config-edit"
+    # SACK entry reports all three CVEs and cites an advisory
+    assert by_id["sack-panic-disable-tcp-sack"]["cves"] == \
+        ["CVE-2019-11477", "CVE-2019-11478", "CVE-2019-11479"]
+    assert "CVE-2019-11477" in by_id["sack-panic-disable-tcp-sack"]["source_ref"]
+
+
+def test_list_mitigations_builtin_only():
+    eng = build_demo_engine()                        # no folder
+    rows = eng.list_mitigations()
+    assert [r["mitigation_id"] for r in rows] == ["pwnkit-pkexec-suid"]
+
+
 def test_engine_mitigate_applies_inplace_edit():
     eng = build_demo_engine(mitigations_dir=_MITIGATIONS_DIR)
     eng.registry.register(_host("h2"))

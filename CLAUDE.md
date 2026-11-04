@@ -288,6 +288,16 @@ A patch remediation is sequenced so it is reversible by default:
   patch (when it is most needed). Deleting it is a separate, deliberate,
   approval-gated **CLEANUP** action the operator invokes only once the fix is
   confirmed stable — a safety backup is never destroyed silently.
+- **Credential/provider resolution** — an ssh-host asset carries no link back to
+  its own cloud account or instance type (onboarding stores only host/port/user/
+  key_ref), so this (and the OS_UPGRADE workflow's snapshot) needs that from
+  elsewhere. `composition._snapshot_workflow_defaults` auto-detects: if exactly
+  one cloud account is registered (this fleet's shape — one AWS account, all
+  Lightsail), it resolves that account's real `credential_ref` and defaults to
+  `"lightsail"`; otherwise it falls back to the long-standing demo default
+  (`"aws/demo"` + `"ec2"`), so demo engines are unaffected. `--default-cloud-
+  account`/`--default-cloud-service` override it explicitly for a multi-account
+  fleet or one with EC2 hosts.
 
 ### 6c. OS-upgrade preflight (read-only) & the OS_UPGRADE workflow
 When a host runs an **end-of-life or ESM-only OS**, many CVEs have no fix in the

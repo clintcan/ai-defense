@@ -499,7 +499,9 @@ def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None =
                 known_hosts: str | None = None, allow_unknown_hosts: bool = False,
                 aws_region: str | None = None, osv: bool = False,
                 osv_ecosystem: str = "Debian", kev: bool = False,
-                mitigations_dir: str | None = None) -> Engine:
+                mitigations_dir: str | None = None,
+                default_cloud_account: str | None = None,
+                default_cloud_service: str | None = None) -> Engine:
     if engine is not None:
         return engine
     sf = None
@@ -516,7 +518,9 @@ def _engine_for(engine: Engine | None, db: str | None, *, ssh_keys: str | None =
                                 known_hosts=known_hosts,
                                 allow_unknown_hosts=allow_unknown_hosts,
                                 aws_region=aws_region, advisory_feed=feed,
-                                enrich_kev=kev, mitigations_dir=mitigations_dir)
+                                enrich_kev=kev, mitigations_dir=mitigations_dir,
+                                default_cloud_account=default_cloud_account,
+                                default_cloud_service=default_cloud_service)
     return build_demo_engine(session_factory=sf, aws_region=aws_region,
                              advisory_feed=feed, enrich_kev=kev,
                              mitigations_dir=mitigations_dir)
@@ -615,16 +619,23 @@ def serve(engine: Engine | None = None, *, db: str | None = None,
           allow_unknown_hosts: bool = False,
           aws_region: str | None = None, osv: bool = False,
           osv_ecosystem: str = "Debian", kev: bool = False,
-          mitigations_dir: str | None = None) -> None:  # pragma: no cover
+          mitigations_dir: str | None = None,
+          default_cloud_account: str | None = None,
+          default_cloud_service: str | None = None) -> None:  # pragma: no cover
     """Run the MCP server over stdio. Requires the ``mcp`` extra (>=2).
 
     With ``db`` the engine is durable and shares assets/approvals with the
     operator CLI. With ``ssh_keys`` it uses the real SSH backend (paramiko). With
     ``aws_region`` it uses live boto3 for the cloud tools. With ``osv`` it pulls
     real advisories from OSV.dev for the packages a scan observes. With
-    ``mitigations_dir`` it loads extra CVE mitigations from that folder."""
+    ``mitigations_dir`` it loads extra CVE mitigations from that folder.
+    ``default_cloud_account``/``default_cloud_service`` pick the credential/
+    provider the patch- and OS-upgrade snapshot workflows use (auto-detected from
+    the registry when exactly one cloud account is registered; see build_engine)."""
     eng = _engine_for(engine, db, ssh_keys=ssh_keys, known_hosts=known_hosts,
                       allow_unknown_hosts=allow_unknown_hosts, aws_region=aws_region,
                       osv=osv, osv_ecosystem=osv_ecosystem, kev=kev,
-                      mitigations_dir=mitigations_dir)
+                      mitigations_dir=mitigations_dir,
+                      default_cloud_account=default_cloud_account,
+                      default_cloud_service=default_cloud_service)
     build_mcp_server(eng).run("stdio")

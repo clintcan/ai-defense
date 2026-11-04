@@ -86,6 +86,50 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _cloud_account_credential_ref(registry, account_id: str) -> str:
+    asset = registry.get(account_id)
+    if asset is None:
+        raise KeyError(f"cloud account not registered: {account_id}")
+    ref = (asset.attributes or {}).get("credential_ref")
+    if not ref:
+        raise KeyError(f"account {account_id} has no credential_ref")
+    return ref
+
+
+def _single_registered_cloud_account(registry) -> str | None:
+    """The one registered ``cloud-account:*`` asset's id, or ``None`` if there are
+    zero or more than one — ambiguous, so the caller falls back rather than guess."""
+    accounts = [a.asset_id for a in registry.all() if a.kind.startswith("cloud-account")]
+    return accounts[0] if len(accounts) == 1 else None
+
+
+def _snapshot_workflow_defaults(
+    registry, *, default_cloud_account: str | None, default_cloud_service: str | None,
+) -> tuple[Callable[[str], str], Callable[[str], str]]:
+    """``credential_ref_for``/``service_for`` for the patch- and OS-upgrade
+    snapshot-before-change workflows.
+
+    ssh-host assets carry no link back to a cloud account or instance type today
+    (CLAUDE.md's onboarding model stops at host/port/user/key_ref), so there is no
+    per-host data to resolve from. Where exactly one cloud account is registered —
+    true for this fleet (one AWS account, all Lightsail) — resolve its real
+    credential_ref and default to "lightsail"; this is a one-account-fleet
+    heuristic, not a generic multi-account/mixed-service resolver. Falls back to
+    the literal "aws/demo" / "ec2" (the long-standing demo/test default, resolved
+    in DEMO_SECRETS) when zero or more than one account is registered, so demo
+    engines and existing tests are unaffected. An explicit ``default_cloud_account``/
+    ``default_cloud_service`` always wins over the auto-detected one."""
+    account_id = default_cloud_account or _single_registered_cloud_account(registry)
+    service = default_cloud_service or ("lightsail" if account_id else "ec2")
+
+    def _cred_ref_for(_asset_id: str) -> str:
+        if account_id is None:
+            return "aws/demo"
+        return _cloud_account_credential_ref(registry, account_id)
+
+    return _cred_ref_for, (lambda _asset_id: service)
+
+
 def _mitigation_action_kind(action_name: str) -> str:
     """Classify the action a mitigation references, for read-only listing."""
     if action_name in CATALOG:
@@ -389,13 +433,7 @@ class Engine:
 
     # -- cloud (AWS) ------------------------------------------------------
     def _account_credential_ref(self, account_id: str) -> str:
-        asset = self.registry.get(account_id)
-        if asset is None:
-            raise KeyError(f"cloud account not registered: {account_id}")
-        ref = (asset.attributes or {}).get("credential_ref")
-        if not ref:
-            raise KeyError(f"account {account_id} has no credential_ref")
-        return ref
+        return _cloud_account_credential_ref(self.registry, account_id)
 
     def _cloud_dispatch(self, tool: str, account_id: str, action_class: ActionClass,
                         extra: dict, reason: str) -> ToolResult:
@@ -459,6 +497,8 @@ def build_engine(
     enrich_kev: bool = False,
     kev_catalog: Any = None,
     mitigations_dir: str | None = None,
+    default_cloud_account: str | None = None,
+    default_cloud_service: str | None = None,
 ) -> Engine:
     """Wire an Engine from parts.
 
@@ -470,6 +510,14 @@ def build_engine(
     The backend arguments default to the simulated demo backends; a production
     build injects real ones (paramiko transport, boto3 client, a real vault) —
     the wiring is otherwise identical.
+
+    ``default_cloud_account``/``default_cloud_service`` pick the credential_ref
+    and provider ("ec2"/"lightsail") the patch- and OS-upgrade workflows use for
+    their pre-change snapshot, since an ssh-host asset doesn't carry a link to its
+    own cloud account/instance type. Left unset, they auto-detect: if exactly one
+    cloud account is registered, its real credential_ref + "lightsail" (this
+    fleet's shape); otherwise the demo default ("aws/demo" + "ec2"). Pass them
+    explicitly for a multi-account fleet or one with EC2 hosts.
     """
     clock = _utcnow
     now = clock()
@@ -556,16 +604,21 @@ def build_engine(
 
     scanner = AuthenticatedScanner(host_inspector)
     preflighter = OsUpgradePreflight()
+    cred_ref_for, service_for = _snapshot_workflow_defaults(
+        registry, default_cloud_account=default_cloud_account,
+        default_cloud_service=default_cloud_service)
     return Engine(
         registry=registry, dispatcher=dispatcher, approvals=approvals, audit=audit,
         scanner=scanner,
         planner=RemediationPlanner(),
-        workflow=RemediationWorkflow(dispatcher, credential_ref_for=lambda _a: "aws/demo"),
+        workflow=RemediationWorkflow(dispatcher, credential_ref_for=cred_ref_for,
+                                     service_for=service_for),
         feed=feed,
         preflighter=preflighter,
         mitigations=mitigations,
         os_workflow=OsUpgradeWorkflow(dispatcher, scanner, preflighter,
-                                      credential_ref_for=lambda _a: "aws/demo"),
+                                      credential_ref_for=cred_ref_for,
+                                      service_for=service_for),
         clock=clock,
     )
 
@@ -582,13 +635,17 @@ def build_ssh_engine(
     enrich_kev: bool = False,
     aws_region: str | None = None,
     mitigations_dir: str | None = None,
+    default_cloud_account: str | None = None,
+    default_cloud_service: str | None = None,
 ) -> Engine:
     """Engine with the REAL SSH backend: a paramiko transport, a file-backed
     vault (keys under ``key_dir``, referenced by key_ref), and a read-only SSH
     host inspector. Cloud tools remain simulated (the AWS backend is separate).
 
     Requires the ``ssh`` extra (paramiko). Host-key verification is on unless
-    ``allow_unknown_hosts`` is set.
+    ``allow_unknown_hosts`` is set. See ``build_engine`` for
+    ``default_cloud_account``/``default_cloud_service`` (the patch- and
+    OS-upgrade snapshot workflows' credential/provider resolution).
     """
     from .scanner.ssh_inspector import SSHHostInspector
     from .ssh.paramiko_transport import ParamikoTransport
@@ -611,6 +668,8 @@ def build_ssh_engine(
         enrich_kev=enrich_kev,
         aws_region=aws_region,
         mitigations_dir=mitigations_dir,
+        default_cloud_account=default_cloud_account,
+        default_cloud_service=default_cloud_service,
     )
 
 

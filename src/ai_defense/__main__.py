@@ -38,6 +38,12 @@ def _add_engine_args(p: argparse.ArgumentParser) -> None:
                    help="folder of CVE mitigation files (yaml/json, one or many per file) "
                         "to load alongside the built-ins; each entry must reference an "
                         "allowlisted catalog command")
+    p.add_argument("--default-cloud-account", default=None,
+                   help="cloud account (asset id) the patch/OS-upgrade snapshot step uses "
+                        "for credentials; auto-detected if exactly one is registered")
+    p.add_argument("--default-cloud-service", default=None, choices=["ec2", "lightsail"],
+                   help="provider the patch/OS-upgrade snapshot step targets; defaults to "
+                        "lightsail when a cloud account is auto-detected, else ec2")
 
 
 def _engine_from_args(args):
@@ -45,7 +51,9 @@ def _engine_from_args(args):
     return _engine_for(None, args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
                        allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
                        osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev,
-                       mitigations_dir=args.mitigations_dir)
+                       mitigations_dir=args.mitigations_dir,
+                       default_cloud_account=args.default_cloud_account,
+                       default_cloud_service=args.default_cloud_service)
 
 
 def _fleet_asset_ids(engine) -> list[str]:
@@ -74,7 +82,9 @@ def _run_mcp(args) -> int:
     serve(db=args.db, ssh_keys=args.ssh_keys, known_hosts=args.known_hosts,
           allow_unknown_hosts=args.allow_unknown_hosts, aws_region=args.aws_region,
           osv=args.osv, osv_ecosystem=args.osv_ecosystem, kev=args.kev,
-          mitigations_dir=args.mitigations_dir)
+          mitigations_dir=args.mitigations_dir,
+          default_cloud_account=args.default_cloud_account,
+          default_cloud_service=args.default_cloud_service)
     return 0
 
 

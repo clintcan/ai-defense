@@ -369,7 +369,11 @@ emits four deliverables:
   sets `feed_degraded: true`, and **every DefectDojo finding is tagged
   `scan-degraded`** — a degraded import must be run with auto-close **disabled**,
   because the findings the partial scan missed are exactly the ones DefectDojo
-  would otherwise close as "fixed".
+  would otherwise close as "fixed". The same guard covers the live paths:
+  `Engine.advisory_feed_health()` exposes the last fetch's completeness, `plan`
+  flags `feed_degraded`, and `remediate` returns `undetermined` (retry) rather
+  than `no_patch_available` when its own advisory re-query came back incomplete —
+  a throttled OSV query is never read as "nothing to patch".
 - **Scan-exempt assets.** An ssh-host that is intentionally not SSH-reachable can
   be flagged `scan_exempt` in its registry `attributes` (operator action: the
   `scan-exempt` CLI, stored as a non-secret attribute; connection and

@@ -236,6 +236,13 @@ Then tell Claude "try the patch again" — `remediate` now applies it (dry-run
 first) and returns `status: patched`. Ask "show me the audit log" to see the
 hash-chained trail (`audit_tail`).
 
+`remediate` fails safe on its negatives: if the advisory feed (OSV) is
+temporarily throttled it returns `status: undetermined` ("retry shortly") rather
+than a misleading `no_patch_available`, and an unreachable host returns
+`status: scan_failed` — a transient data gap is never mistaken for "nothing to
+patch". Likewise `plan` adds `feed_degraded: true` when its advisory fetch was
+incomplete, so a thin plan isn't read as a clean bill of health.
+
 ## Safeguards that remain in force
 
 - Claude only emits intents through these tools; it cannot run arbitrary

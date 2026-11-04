@@ -263,7 +263,13 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
 
         if name == "plan":
             inv = engine.scan(list(args["asset_ids"]))
-            return {"plan": [_item_json(it) for it in engine.plan(inv)]}
+            plan = engine.plan(inv)
+            out = {"plan": [_item_json(it) for it in plan]}
+            degraded, note = engine.advisory_feed_health()
+            if degraded:                       # a thin plan may be throttling, not reality
+                out["feed_degraded"] = True
+                out["feed_note"] = note
+            return out
 
         if name == "upgrade_preflight":
             reports = engine.upgrade_preflight(list(args["asset_ids"]))
@@ -354,9 +360,24 @@ def _tool_result_json(res) -> dict:
 
 def _remediate(engine: Engine, asset_id: str, package: str, snapshot: bool) -> dict:
     inv = engine.scan([asset_id])
+    # An unscannable host is not "no patch" — say so plainly (fail safe).
+    hf = next((f for f in inv if f.asset_id == asset_id), None)
+    if hf is not None and any(i.startswith("scan failed") for i in hf.misconfigurations):
+        return {"status": "scan_failed",
+                "detail": f"could not scan {asset_id}: {'; '.join(hf.misconfigurations)} "
+                          f"— resolve that before remediating"}
     item = next((it for it in engine.plan(inv)
                  if it.asset_id == asset_id and it.package == package and it.intent), None)
     if item is None:
+        # Distinguish "no patch exists" from "the advisory feed was incomplete
+        # this run" — a throttled/degraded OSV query must never read as a clean
+        # 'no patch available' (same fail-safe as the report feed_degraded flag).
+        degraded, note = engine.advisory_feed_health()
+        if degraded:
+            return {"status": "undetermined",
+                    "detail": f"could not confirm a patch for {package} on {asset_id}: the "
+                              f"advisory feed was incomplete this run ({note}). Retry shortly "
+                              f"— this is NOT a confirmation that no patch exists."}
         return {"status": "no_patch_available",
                 "detail": f"no patch remediation found for {package} on {asset_id} "
                           f"(it may need a mitigation/escalation — see plan)"}

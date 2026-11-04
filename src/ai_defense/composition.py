@@ -231,6 +231,17 @@ class Engine:
                                 scan_mode=scan_mode,
                                 feed_degraded=degraded, feed_note=note)
 
+    def advisory_feed_health(self) -> tuple[bool, str | None]:
+        """Whether the most recent advisory fetch (``feed.for_inventory``) was
+        incomplete, plus a human-readable note. Lets a caller distinguish "no
+        patch exists" from "the advisory feed was degraded this run" (fail-safe,
+        hard rule #7) — so a throttled OSV query never reads as a clean negative."""
+        inner = getattr(self.feed, "_inner", self.feed)
+        health = getattr(inner, "health", None)
+        if health is not None and health.degraded:
+            return True, health.summary()
+        return False, None
+
     def remediate(self, item: RemediationItem, *, snapshot: bool | None = None,
                   existing_snapshot_ids: list[str] | None = None) -> WorkflowResult:
         return self.workflow.run(item, snapshot=snapshot,

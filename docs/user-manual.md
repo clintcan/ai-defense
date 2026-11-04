@@ -220,6 +220,36 @@ claude mcp add ai-defense -- "C:\path\to\ai_defense\.venv\Scripts\ai-defense.exe
 
 Then `claude mcp list` should show **ai-defense … ✔ Connected**.
 
+### 7c. Using a different AI tool (not Claude)
+
+AI Defense isn't tied to Claude. It speaks a shared standard called **MCP**, so
+other AI assistants that support MCP can use it too — for example the editors
+**Cursor**, **Windsurf**, and **Zed**, **VS Code** (with Copilot's agent mode),
+or extensions like **Cline** and **Continue**. Look in your tool's settings for
+an "MCP" or "MCP servers" section.
+
+Most of them use the **same settings block** as Claude Desktop — you paste it
+into that tool's MCP configuration instead (adjust the path to your install):
+
+```json
+{ "mcpServers": { "ai-defense": {
+    "command": "C:\\path\\to\\ai_defense\\.venv\\Scripts\\ai-defense.exe",
+    "args": ["mcp", "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"] } } }
+```
+
+Two things to know:
+
+- **It runs on your own computer.** The AI tool starts AI Defense as a little
+  helper program on your machine — there's no website or server to expose. A
+  cloud-only assistant that can't launch a local helper won't be able to connect.
+- **Your safety still holds — but check one setting.** Passwords never reach the
+  AI, and nothing changes a server until a change is approved, with *any* tool.
+  But some AI tools can be set to run actions **automatically** without asking.
+  Since "approve a change" is itself an action, an automatic tool could end up
+  approving its own change. If your tool runs things automatically, do your
+  approvals from a terminal instead (see [Step 7](#10-step-7--approving-changes))
+  so a person is always the one who says "yes".
+
 ### Turning on the real-server and cloud features
 
 The command above runs in safe **demo mode**. To manage real machines, add more

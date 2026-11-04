@@ -121,6 +121,49 @@ claude mcp remove ai-defense    # remove it
 To change the command (e.g. switch to real SSH mode), `remove` then `add` again.
 Then `claude` — the tools are available in the session.
 
+## 2c. Other MCP clients (Cursor, Cline, Zed, VS Code, Goose, …)
+
+MCP is an open protocol and this is a standard **stdio** server, so any host that
+can launch a local stdio MCP server can drive it — the planner/enforcer boundary
+and every safeguard are identical regardless of client. Clients that work this
+way include **Cursor**, **Windsurf**, **Zed**, **VS Code** (Copilot agent mode),
+the **Cline** and **Continue** extensions, **Goose**, **LibreChat**, desktop
+clients like **Cherry Studio** / **5ire** / **Witsy**, and anything built on the
+MCP or OpenAI Agents SDKs. Check each client's own MCP docs for where its config
+lives; the block is almost always the same `mcpServers` shape as Claude Desktop
+(§2a):
+
+```json
+{
+  "mcpServers": {
+    "ai-defense": {
+      "command": "C:\\path\\to\\ai_defense\\.venv\\Scripts\\ai-defense.exe",
+      "args": ["mcp",
+               "--db", "sqlite+pysqlite:///C:/path/to/ai_defense/ai.db"]
+    }
+  }
+}
+```
+
+Add the same real-SSH / `--osv` / `--aws-region` args to `args` exactly as in
+§2a/§2b. On macOS/Linux the command is `…/.venv/bin/ai-defense` (no `.exe`). Two
+caveats:
+
+- **Local stdio only.** The host launches the server as a child process on the
+  same machine; there is no network endpoint. A remote/hosted client (e.g.
+  ChatGPT connectors, which expect an HTTP MCP endpoint) won't connect as-is —
+  the `mcp` SDK *can* serve over HTTP/SSE, but exposing an infrastructure-control
+  server on the network is a deliberate security step (auth, TLS, network ACLs),
+  not the default posture.
+- **The approval gate is server-side; the pre-run prompt is client-side.** The
+  guarantees that matter hold with any client — secrets never reach the model,
+  and a mutating tool returns *pending* until `approve_change` is called. But
+  whether the client asks a human before each tool call varies, and some agent
+  clients auto-run tools. Because `approve_change` is itself a tool, a fully
+  auto-running agent could approve its own change-set — so with such a client,
+  approve **out-of-band** (§5, the `pending` / `approve` CLI) to keep a human in
+  the loop.
+
 ## 3. Onboard a host first
 
 The demo backends ship a simulated vault key `ssh-key/vps-demo-01`, so onboard a

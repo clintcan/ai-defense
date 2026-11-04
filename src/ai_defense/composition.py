@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -125,6 +125,10 @@ class Engine:
     # Set true once a canary OS upgrade comes back healthy; unlocks the
     # os_upgrade_fleet canary->fleet precondition for this engine session.
     _os_canary_ok: bool = False
+    # Snapshot ids taken for an in-flight OS upgrade, keyed by asset_id — held
+    # server-side so the re-run (apply) reuses the real snapshot WITHOUT trusting
+    # a model-supplied id. Cleared when the upgrade reaches a terminal state.
+    _os_snapshots: dict[str, list[str]] = field(default_factory=dict)
 
     # -- inventory --------------------------------------------------------
     def list_assets(self) -> list[Asset]:
@@ -341,21 +345,31 @@ class Engine:
             targets=[asset_id], action_class=ActionClass.MITIGATE_CANARY,
             reason=f"{verb} {cve_id} on {asset_id}: {m.title}", source_ref=m.source_ref))
 
-    def os_upgrade(self, asset_id: str, *, canary: bool = True,
-                   existing_snapshot_ids: list[str] | None = None) -> OsUpgradeResult:
+    def os_upgrade(self, asset_id: str, *, canary: bool = True) -> OsUpgradeResult:
         """Drive the strongly-gated in-place OS upgrade of one host (CLAUDE.md 6c):
         preflight-gated (must be READY), a mandatory pre-upgrade snapshot, a
         human-approved upgrade+reboot (``os_upgrade_canary`` / ``_fleet``), then a
         reconnect → health → re-scan check that HALTS and keeps the snapshot as the
         restore point on failure — an in-place dist-upgrade can't be auto-reverted.
 
+        The pre-upgrade snapshot is taken on the first call and its ids are held
+        **server-side** (keyed by asset_id); the re-run to apply after approval
+        reuses them automatically — the model never supplies a snapshot id, so the
+        mandatory-backup invariant can't be satisfied by a forged one.
+
         Canary by default. The fleet class only clears its canary→fleet
         precondition once a canary has come back healthy in this engine session
         (tracked in-memory, not persisted). Returns a pending change_set_id until
-        approved; re-call with the returned ``existing_snapshot_ids`` to apply
-        without re-snapshotting."""
-        result = self.os_workflow.run(asset_id, canary=canary,
-                                      existing_snapshot_ids=existing_snapshot_ids)
+        approved; just call again (same asset) to apply."""
+        result = self.os_workflow.run(
+            asset_id, canary=canary,
+            existing_snapshot_ids=self._os_snapshots.get(asset_id))
+        if result.status == UPGRADE_PENDING:
+            # remember the snapshot taken for this in-flight upgrade (server-side)
+            if result.snapshot_ids:
+                self._os_snapshots[asset_id] = list(result.snapshot_ids)
+        else:
+            self._os_snapshots.pop(asset_id, None)   # terminal: next step re-snapshots
         if canary and result.status == UPGRADED:
             self._os_canary_ok = True
         if (not canary and result.status == UPGRADE_PENDING

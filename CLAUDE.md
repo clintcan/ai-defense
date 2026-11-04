@@ -314,14 +314,22 @@ host.
   autonomous; never upgrade without a restore point) → human-approved
   **upgrade + reboot** as one reviewed action (`os.release_upgrade`, dry-run
   `do-release-upgrade -c` first) under `os_upgrade_canary` (**two approvals**) /
-  `os_upgrade_fleet` (two, `after: canary_health_ok`, blast cap small) → **reconnect
-  poll → health check** (back on the target `VERSION_ID`?) → **post-upgrade
-  re-scan**. On failure it **halts and keeps the snapshot as the restore point**
-  (operator decision 2026-11-05): an in-place dist-upgrade can't be auto-reverted,
-  so there is no silent rollback — a human restores the snapshot. For cloud images
-  (e.g. Lightsail) the vendor-preferred path may be rebuild-from-blueprint +
-  migrate rather than in-place; that stays a preflight recommendation, not
-  automated. Debian in-place is a follow-up.
+  `os_upgrade_fleet` (two, `after: canary_health_ok`, blast cap small) → **confirm a
+  real reboot** (the host must be observed to go *down* then return — not merely be
+  reachable, since `do-release-upgrade` rewrites `/etc/os-release` to the new
+  release *before* the reboot) → **health check** (back on the target `VERSION_ID`?)
+  → **post-upgrade re-scan**. The mandatory snapshot's ids are held **server-side**
+  (the model never supplies one, so the backup invariant can't be met by a forged
+  id). On failure it **halts and keeps the snapshot as the restore point** (operator
+  decision 2026-11-05): an in-place dist-upgrade can't be auto-reverted, so there is
+  no silent rollback — a human restores the snapshot. For cloud images (e.g.
+  Lightsail) the vendor-preferred path may be rebuild-from-blueprint + migrate
+  rather than in-place; that stays a preflight recommendation, not automated.
+  **Known v1 limitations:** the reconnect probe reuses the scanner's session rather
+  than proving a brand-new login, and the down→up check (not a boot-id compare) can
+  in principle be fooled by a transient blip; the canary→fleet unlock is a
+  session-wide flag; Debian in-place isn't wired. All fail safe (a wrong guess
+  halts and keeps the backup, never a silent change).
 
 ### 6a. Managed configuration primitives
 Config/module/service remediations are expressed as declarative, reviewable

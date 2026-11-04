@@ -170,14 +170,14 @@ TOOLS: list[dict[str, Any]] = [
                        "— halting and keeping the snapshot as the restore point if it doesn't. "
                        "Canary by default (2 approvals); set canary=false for the fleet (only "
                        "after a healthy canary). Returns a pending change_set_id until approved, "
-                       "then call again with the returned snapshot_ids to apply.",
+                       "then just call again for the same asset to apply (the pre-upgrade "
+                       "snapshot is remembered server-side).",
         "inputSchema": {
             "type": "object",
             "required": ["asset_id"],
             "properties": {
                 "asset_id": {"type": "string"},
                 "canary": {"type": "boolean"},
-                "snapshot_ids": {"type": "array", "items": {"type": "string"}},
             },
         },
     },
@@ -395,9 +395,7 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
             return out
 
         if name == "os_upgrade":
-            r = engine.os_upgrade(
-                args["asset_id"], canary=args.get("canary", True),
-                existing_snapshot_ids=args.get("snapshot_ids"))
+            r = engine.os_upgrade(args["asset_id"], canary=args.get("canary", True))
             out: dict[str, Any] = {
                 "asset_id": r.asset_id, "status": r.status,
                 "ok": r.status == "upgraded",
@@ -411,7 +409,7 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
             if r.status == "upgrade_pending":
                 out["change_set_id"] = r.change_set_id
                 out["next"] = ("ask the operator to approve (os_upgrade_canary needs 2), then "
-                               "call os_upgrade again with snapshot_ids to apply")
+                               "call os_upgrade again for the same asset to apply")
             return out
 
         if name == "update_asset":
@@ -580,10 +578,8 @@ def build_mcp_server(engine: Engine):  # pragma: no cover - exercised via QA/imp
     def revert_mitigation(asset_id: str, cve: str) -> dict:
         return handle_call(engine, "revert_mitigation", {"asset_id": asset_id, "cve": cve})
 
-    def os_upgrade(asset_id: str, canary: bool = True,
-                   snapshot_ids: list[str] | None = None) -> dict:
-        return handle_call(engine, "os_upgrade", {
-            "asset_id": asset_id, "canary": canary, "snapshot_ids": snapshot_ids})
+    def os_upgrade(asset_id: str, canary: bool = True) -> dict:
+        return handle_call(engine, "os_upgrade", {"asset_id": asset_id, "canary": canary})
 
     def update_asset(asset_id: str, host: str | None = None, port: int | None = None,
                      user: str | None = None, key_ref: str | None = None) -> dict:

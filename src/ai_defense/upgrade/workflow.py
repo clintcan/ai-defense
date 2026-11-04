@@ -160,14 +160,25 @@ class OsUpgradeWorkflow:
                    "is confirmed stable (delete via the CLEANUP action)."])
 
     def _await_reconnect(self, asset_id: str) -> tuple[bool, HostFindings | None]:
-        """Poll the (read-only) scanner until the host answers and reports its
-        release, or we run out of attempts. A successful scan populates
-        ``os_release``; a failed one (still rebooting / unreachable) leaves it empty."""
+        """Confirm the host actually rebooted: wait for it to go **down** (a scan
+        that can't reach it), then wait for it to come back **up**.
+
+        Accepting the first reachable scan would be wrong — ``do-release-upgrade``
+        rewrites ``/etc/os-release`` to the new release *during* the upgrade, before
+        the reboot, so the still-up pre-reboot host already reports the target
+        version. Requiring a down→up transition is the evidence that the reboot
+        happened; without it we could declare success on a host that never went
+        down and then fails to boot. (A successful scan populates ``os_release``; a
+        failed one — unreachable / still rebooting — leaves it empty.)"""
+        saw_down = False
         last: HostFindings | None = None
         for i in range(self._attempts):
             f = self._scanner.scan_host(asset_id)
-            if f.os_release:
-                return True, f
+            reachable = bool(f.os_release)
+            if reachable and saw_down:
+                return True, f               # came back only after going down
+            if not reachable:
+                saw_down = True
             last = f
             if i < self._attempts - 1:
                 self._sleep(self._delay)

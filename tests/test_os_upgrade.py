@@ -85,7 +85,9 @@ def _wf(disp, scanner):
 
 def test_happy_path_upgraded_snapshots_first_under_canary_class():
     disp = _Dispatcher(upgrade="ok")
-    r = _wf(disp, _Scanner(_findings("18.04"), [_findings("20.04")])).run("h")
+    # reconnect must observe the host go DOWN (reboot) then come back UP on target
+    sc = _Scanner(_findings("18.04"), [_findings(None, reachable=False), _findings("20.04")])
+    r = _wf(disp, sc).run("h")
     assert r.status == UPGRADED and r.reconnected and r.post_os == "20.04"
     assert r.snapshot_ids == ["snap-1"]
     assert [i.tool for i in disp.calls] == [SNAPSHOT_TOOL, OS_UPGRADE_TOOL]   # snapshot first
@@ -96,9 +98,20 @@ def test_happy_path_upgraded_snapshots_first_under_canary_class():
 
 def test_reconnect_but_wrong_version_halts_and_keeps_snapshot():
     disp = _Dispatcher(upgrade="ok")
-    r = _wf(disp, _Scanner(_findings("18.04"), [_findings("18.04")])).run("h")  # still 18.04
+    # went down and came back, but still on 18.04 (upgrade didn't take)
+    sc = _Scanner(_findings("18.04"), [_findings(None, reachable=False), _findings("18.04")])
+    r = _wf(disp, sc).run("h")
     assert r.status == HEALTH_FAILED_HALTED and r.reconnected
     assert r.snapshot_ids == ["snap-1"] and any("restore" in n.lower() for n in r.notes)
+
+
+def test_never_went_down_is_not_accepted_as_rebooted():
+    # a host that stays reachable on the target version the whole time (os-release
+    # is rewritten before reboot) must NOT be read as a successful reboot.
+    disp = _Dispatcher(upgrade="ok")
+    sc = _Scanner(_findings("18.04"), [_findings("20.04"), _findings("20.04")])
+    r = _wf(disp, sc).run("h")
+    assert r.status == HEALTH_FAILED_HALTED and not r.reconnected
 
 
 def test_no_reconnect_halts():
@@ -154,38 +167,48 @@ def _host(asset_id="up-h") -> Asset:
                                            user="ubuntu"))
 
 
+def _fast_reconnect(eng):
+    # the demo host never "goes down", so cap the reconnect poll so the test
+    # doesn't wait out the real 30x10s; it will correctly halt (never rebooted).
+    eng.os_workflow._attempts = 2
+    eng.os_workflow._delay = 0
+    eng.os_workflow._sleep = lambda _s: None
+
+
 def test_engine_canary_needs_two_approvals_then_applies_and_halts_in_sim():
     eng = build_demo_engine()
+    _fast_reconnect(eng)
     eng.registry.register(_host("up-h"))
     p = eng.os_upgrade("up-h")
     assert p.status == UPGRADE_PENDING and p.change_set_id and p.snapshot_ids   # snapshot taken
 
     eng.approve(p.change_set_id, "op1")
-    mid = eng.os_upgrade("up-h", existing_snapshot_ids=p.snapshot_ids)
+    mid = eng.os_upgrade("up-h")                             # engine reuses the stored snapshot
     assert mid.status == UPGRADE_PENDING                     # one approval isn't enough
 
     eng.approve(p.change_set_id, "op2")
-    done = eng.os_upgrade("up-h", existing_snapshot_ids=p.snapshot_ids)
-    # upgrade applies; the demo host still reports 18.04, so health halts and the
-    # mandatory snapshot is retained as the restore point.
+    done = eng.os_upgrade("up-h")
+    # upgrade applies; the demo host never goes down, so the reboot can't be
+    # confirmed -> halt, with the mandatory snapshot retained as the restore point.
     assert done.upgrade.ok and done.status == HEALTH_FAILED_HALTED
     assert done.snapshot_ids == p.snapshot_ids
 
 
 def test_engine_fleet_blocked_until_a_canary_is_healthy():
     eng = build_demo_engine()
+    _fast_reconnect(eng)
     eng.registry.register(_host("fl-h"))
     g = eng.os_upgrade("fl-h", canary=False)
     assert g.status == UPGRADE_PENDING
     eng.approve(g.change_set_id, "op1")
     eng.approve(g.change_set_id, "op2")
     # approved, but the canary->fleet precondition is unmet -> still gated
-    g2 = eng.os_upgrade("fl-h", canary=False, existing_snapshot_ids=g.snapshot_ids)
+    g2 = eng.os_upgrade("fl-h", canary=False)
     assert g2.status == UPGRADE_PENDING
 
     eng._os_canary_ok = True                                 # a canary came back healthy
-    eng.os_upgrade("fl-h", canary=False, existing_snapshot_ids=g.snapshot_ids)  # marks precondition
-    g3 = eng.os_upgrade("fl-h", canary=False, existing_snapshot_ids=g.snapshot_ids)
+    eng.os_upgrade("fl-h", canary=False)                     # marks the precondition
+    g3 = eng.os_upgrade("fl-h", canary=False)
     assert g3.upgrade and g3.upgrade.ok                      # now clears and applies
 
 
@@ -197,7 +220,7 @@ class _UpgradeTransport:
     def __init__(self, *, dryrun_exit=0, upgrade_exit=0, reboot="ok"):
         self.dryrun_exit = dryrun_exit
         self.upgrade_exit = upgrade_exit
-        self.reboot = reboot            # "ok" | "refused" | "drop"
+        self.reboot = reboot            # "ok" | "refused" | "drop" | "channel_closed"
         self.calls: list = []
 
     def run(self, host, argv, *, key, timeout, user="root", port=22, input=None):
@@ -210,6 +233,8 @@ class _UpgradeTransport:
         if "systemctl reboot" in a:
             if self.reboot == "drop":
                 raise OSError("connection dropped by reboot")
+            if self.reboot == "channel_closed":
+                return CommandOutput(-1, "", "")     # paramiko recv_exit_status on close
             return CommandOutput(0 if self.reboot == "ok" else 1, "", "reboot refused")
         return CommandOutput(0, "", "")
 
@@ -236,12 +261,20 @@ def test_tool_reboot_refused_is_not_reported_as_success():
     tp = _UpgradeTransport(reboot="refused")      # sudo refused, connection did NOT drop
     res = _os_tool(tp)({"asset_id": "h", "target_version": "20.04", "snapshot_id": "snap-1"},
                        resolve_secret=lambda _r: "KEY")
-    assert not res.ok and "reboot could not be issued" in res.summary
+    assert not res.ok and "NOT rebooted" in res.summary
     assert res.data["reboot_issued"] is False and res.data["rollback"]["payload"]["snapshot_id"]
 
 
 def test_tool_reboot_dropping_connection_is_success():
     tp = _UpgradeTransport(reboot="drop")         # reboot severs SSH -> expected success
+    res = _os_tool(tp)({"asset_id": "h"}, resolve_secret=lambda _r: "KEY")
+    assert res.ok and res.data["reboot_issued"] is True
+
+
+def test_tool_reboot_channel_closed_is_success():
+    # paramiko returns exit -1 (not an exception) when the reboot closes the
+    # channel before a status arrives — that's a real reboot, not a failure.
+    tp = _UpgradeTransport(reboot="channel_closed")
     res = _os_tool(tp)({"asset_id": "h"}, resolve_secret=lambda _r: "KEY")
     assert res.ok and res.data["reboot_issued"] is True
 

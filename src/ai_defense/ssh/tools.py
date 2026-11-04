@@ -309,25 +309,37 @@ def make_os_upgrade_tool(
                       "stderr": res.stderr if res else "", "rollback": rb_json},
                 resolved_command=up.resolved_command)
 
-        # 2. Reboot into the upgraded system. A dropped SSH session during reboot
-        #    is expected and counts as success; a clean exit 0 does too. But a
-        #    definite non-zero exit (e.g. sudo refused) WITHOUT the connection
-        #    dropping means the host did not reboot — don't report success, so the
-        #    workflow halts with the snapshot retained rather than falsely claiming
-        #    the host rebooted onto the new kernel.
+        # 2. Reboot into the upgraded system. Classify the outcome carefully — the
+        #    reboot severs the SSH session, so "the command didn't return a clean 0"
+        #    is normal, not failure:
+        #      * transport raised (connection dropped)        -> rebooting (success)
+        #      * exit code <= 0 (0 = clean; -1 = channel closed as the host went
+        #        down; paramiko's recv_exit_status returns -1, it does NOT raise)
+        #                                                      -> rebooting (success)
+        #      * applied=False (e.g. refused before running)  -> NOT issued (failure)
+        #      * POSITIVE exit with a live connection (e.g. sudo refused)
+        #                                                      -> NOT issued (failure)
+        #    On a genuine "not issued", return ok=False so the workflow halts with the
+        #    snapshot retained rather than claiming a host rebooted when it didn't.
         try:
             rb = executor.run_template(conn.host, "os.reboot", {}, key=key,
                                        user=conn.user, port=conn.port, dry_run_first=False)
         except Exception:  # noqa: BLE001 - reboot severs the connection; that's success
             rb = None
-        if rb is not None and rb.result is not None and rb.result.exit_code != 0:
+        reboot_failed = None
+        if rb is not None:
+            if not rb.applied:
+                reboot_failed = f"reboot was refused before running ({rb.blocked_reason})"
+            elif rb.result is not None and rb.result.exit_code > 0:
+                reboot_failed = f"reboot command returned exit {rb.result.exit_code}"
+        if reboot_failed:
             return ToolResult(
                 ok=False, tool=OS_UPGRADE_TOOL,
-                summary=(f"release upgrade applied on {asset_id} but the reboot could not be "
-                         f"issued (exit {rb.result.exit_code}); host NOT rebooted"),
+                summary=(f"release upgrade applied on {asset_id} but {reboot_failed}; "
+                         "host NOT rebooted"),
                 data={"asset_id": asset_id, "target_version": target,
                       "upgrade_exit": res.exit_code, "reboot_issued": False,
-                      "reboot_exit": rb.result.exit_code, "rollback": rb_json},
+                      "rollback": rb_json},
                 resolved_command=up.resolved_command)
 
         return ToolResult(

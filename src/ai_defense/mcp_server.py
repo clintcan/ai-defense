@@ -404,6 +404,10 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                 "snapshot_ids": r.snapshot_ids,
                 "reconnected": r.reconnected, "post_os": r.post_os,
                 "upgrade_summary": r.upgrade.summary if r.upgrade else None,
+                # the tool's own data is already secret-redacted by the dispatcher;
+                # pass it through so a human can see the diff/blocked_reason/stderr
+                # behind a failure instead of just the one-line summary.
+                "upgrade_detail": r.upgrade.data if r.upgrade else None,
                 "notes": r.notes,
             }
             if r.status == "upgrade_pending":

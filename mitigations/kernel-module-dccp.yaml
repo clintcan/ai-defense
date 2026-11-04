@@ -1,0 +1,21 @@
+# CVE-2017-6074 — a use-after-free in the Linux DCCP (Datagram Congestion Control
+# Protocol) module, exploitable for local privilege escalation. DCCP is almost
+# never used; the standard hardening is to blacklist the module so it can't be
+# loaded. Apply writes a /etc/modprobe.d blacklist drop-in and unloads it at
+# runtime; reverse removes the drop-in so it may load again.
+# Run it with:  mitigate <host> CVE-2017-6074
+#               revert_mitigation <host> CVE-2017-6074
+#
+# Both actions are allowlisted kernel-module actions in the reviewed catalog
+# (ssh/catalog/modules.py); the module name is checked against the hardening
+# allowlist. A file may reference one but can't define a new one.
+- id: disable-dccp-module
+  cves: [CVE-2017-6074]
+  title: Blacklist the DCCP kernel module (use-after-free LPE)
+  source_ref: https://www.cve.org/CVERecord?id=CVE-2017-6074
+  template: module.blacklist_dccp
+  rollback_template: module.unblacklist_dccp
+  description: >-
+    write a blacklist drop-in to /etc/modprobe.d/ai-defense-blacklist-dccp.conf and
+    `modprobe -r dccp`; reverse removes the drop-in. A module in use can't be
+    unloaded now but is blocked at next boot.

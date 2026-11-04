@@ -1,0 +1,20 @@
+# CVE-2017-8779 ("rpcbomb") — rpcbind can be driven to allocate and never free
+# memory, a remote DoS. rpcbind (the RPC portmapper) is a legacy service rarely
+# needed on an application server; where it isn't required, disabling it removes
+# the exposure entirely. Apply runs `systemctl disable --now rpcbind`; reverse
+# re-enables it. rpcbind is NOT a protected unit, so disabling it is allowed;
+# the protected-unit denylist still refuses auditd/firewalld/ufw/sshd/etc.
+# Run it with:  mitigate <host> CVE-2017-8779
+#               revert_mitigation <host> CVE-2017-8779
+#
+# Both actions are allowlisted service actions in the reviewed catalog
+# (ssh/catalog/services.py); a file may reference one but can't define a new one.
+- id: disable-rpcbind
+  cves: [CVE-2017-8779]
+  title: Disable rpcbind where unneeded (rpcbomb DoS exposure)
+  source_ref: https://www.cve.org/CVERecord?id=CVE-2017-8779
+  template: service.disable_rpcbind
+  rollback_template: service.disable_rpcbind.reverse
+  description: >-
+    `systemctl disable --now rpcbind` to stop and disable the RPC portmapper;
+    reverse re-enables it. Only a non-protected unit can be disabled this way.

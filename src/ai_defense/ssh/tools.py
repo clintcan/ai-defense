@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from ..registry.assets import AssetRegistry, ConnectionInfo
 from ..toolset.intents import ToolResult
 from ..toolset.registry import ToolCapability, ToolSpec
+from .catalog import action_primitive_kind
 from .executor import SSHExecutor
 from .hardening import PrimitiveKind, RollbackAction
 
@@ -194,8 +195,10 @@ def make_mitigation_tool(
                 conn.host, action_name, {}, key=key,
                 user=conn.user, port=conn.port, dry_run_first=True,
             )
+        rollback_kind = (action_primitive_kind(configs[action_name]) if is_config
+                         else PrimitiveKind.FILE_PERM)
         rollback = RollbackAction(
-            kind=PrimitiveKind.CONFIG_EDIT if is_config else PrimitiveKind.FILE_PERM,
+            kind=rollback_kind,
             description=(f"re-apply mitigation on {asset_id}: {mc.description}" if reverse
                         else f"revert mitigation on {asset_id}: {mc.description}"),
             payload={"asset_id": asset_id, "rollback_template": undo_name},

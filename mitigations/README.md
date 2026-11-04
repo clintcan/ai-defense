@@ -51,13 +51,24 @@ mapping with a top-level `mitigations:` list. Fields:
 | `sshd-x11.yaml` | sshd: disable X11 forwarding (no conf.d) | in-place block edit `config.sshd_disable_x11` |
 | `http2-rapid-reset.yaml` | CVE-2023-44487 (HTTP/2 Rapid Reset): cap nginx concurrent streams | config drop-in `config.nginx_http2_rapidreset` |
 | `php-session-upload-progress.yaml` | Disable PHP `session.upload_progress` (LFI→RCE hardening) | config drop-in `config.php_disable_upload_progress` |
+| `kernel-module-dccp.yaml` | CVE-2017-6074 (DCCP use-after-free LPE): blacklist the `dccp` module | kernel-module `module.blacklist_dccp` |
+| `service-rpcbind.yaml` | CVE-2017-8779 (rpcbomb DoS): disable `rpcbind` where unneeded | service `service.disable_rpcbind` |
 
-A `template`/`rollback_template` may name a **command** (a fixed argv in
-`ssh/catalog/`) or a **config action** (a managed drop-in in
-`ssh/catalog/configs.py`, which writes the file under an allowlisted dir, runs an
-optional validator such as `nginx -t`, reloads, and removes the drop-in if either
-step fails; reversed by deleting it). Either way it must already be reviewed in
-the catalog.
+A `template`/`rollback_template` may name any reviewed catalog action:
+
+- a **command** — a fixed argv in `ssh/catalog/` (packages, sysctl/chmod hardening);
+- a **config action** (`ssh/catalog/configs.py`) — a managed drop-in or in-place
+  marker-block edit under an allowlisted path, with an optional validator (e.g.
+  `nginx -t`), reloaded, and rolled back if validation fails;
+- a **kernel-module action** (`ssh/catalog/modules.py`) — blacklist/unblacklist a
+  module whose name is on the hardening allowlist (`/etc/modprobe.d` drop-in +
+  `modprobe -r`);
+- a **service action** (`ssh/catalog/services.py`) — `systemctl disable/mask/enable`,
+  denylist-first so a protected unit (auditd, firewalld, ufw, sshd, …) can never be
+  disabled.
+
+Either way it must already be reviewed in the catalog — a file can map a CVE to an
+existing action but can never introduce a new one.
 
 To undo an applied mitigation, use the `revert_mitigation` tool (it runs the
 entry's `rollback_template`) — a separate, approval-gated change, not a re-run of

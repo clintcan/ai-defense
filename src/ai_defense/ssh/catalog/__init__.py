@@ -14,6 +14,7 @@ Public API is unchanged: ``CATALOG``, ``CommandTemplate``, ``render_argv``.
 
 from __future__ import annotations
 
+from ..hardening import PrimitiveKind
 from . import hardening, packages
 from ._template import CommandTemplate, render_argv
 from .configs import (
@@ -27,6 +28,8 @@ from .configs import (
     dir_allowed,
     edit_path_allowed,
 )
+from .modules import MODULE_ACTIONS, ModuleBlacklist, ModuleUnblacklist
+from .services import SERVICE_ACTIONS, ServiceStateChange
 
 
 def _merge(*categories: dict[str, CommandTemplate]) -> dict[str, CommandTemplate]:
@@ -43,7 +46,38 @@ def _merge(*categories: dict[str, CommandTemplate]) -> dict[str, CommandTemplate
 
 CATALOG: dict[str, CommandTemplate] = _merge(packages.TEMPLATES, hardening.TEMPLATES)
 
+
+def _merge_actions(*dicts: dict) -> dict:
+    """Merge category action dicts, refusing a name defined twice."""
+    merged: dict = {}
+    for d in dicts:
+        for name, action in d.items():
+            if name in merged:
+                raise ValueError(f"duplicate catalog action name across categories: {name!r}")
+            merged[name] = action
+    return merged
+
+
+# Every reviewed managed-primitive action (config edits + kernel modules +
+# services + …), keyed by name. A mitigation references one of these; the
+# ConfigExecutor dispatches it by type. CONFIG_ACTIONS stays the config-only view
+# for back-compat.
+PRIMITIVE_ACTIONS: dict = _merge_actions(CONFIG_ACTIONS, MODULE_ACTIONS, SERVICE_ACTIONS)
+
+
+def action_primitive_kind(action) -> PrimitiveKind:
+    """The PrimitiveKind a reviewed action belongs to (for audit/rollback/listing)."""
+    if isinstance(action, (ModuleBlacklist, ModuleUnblacklist)):
+        return PrimitiveKind.KERNEL_MODULE
+    if isinstance(action, ServiceStateChange):
+        return PrimitiveKind.SERVICE
+    return PrimitiveKind.CONFIG_EDIT    # DropIn*/ConfigBlock*
+
+
 __all__ = ["CATALOG", "CommandTemplate", "render_argv",
-           "CONFIG_ACTIONS", "DropInWrite", "DropInRemove", "dir_allowed",
+           "CONFIG_ACTIONS", "PRIMITIVE_ACTIONS", "action_primitive_kind",
+           "DropInWrite", "DropInRemove", "dir_allowed",
            "ALLOWED_DROPIN_DIRS", "ConfigBlockWrite", "ConfigBlockRemove",
-           "edit_path_allowed", "ALLOWED_EDIT_PATHS"]
+           "edit_path_allowed", "ALLOWED_EDIT_PATHS",
+           "MODULE_ACTIONS", "ModuleBlacklist", "ModuleUnblacklist",
+           "SERVICE_ACTIONS", "ServiceStateChange"]

@@ -50,11 +50,14 @@ from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
 from .ssh.catalog import (
     CATALOG,
-    CONFIG_ACTIONS,
+    PRIMITIVE_ACTIONS,
     ConfigBlockRemove,
     ConfigBlockWrite,
     DropInRemove,
     DropInWrite,
+    ModuleBlacklist,
+    ModuleUnblacklist,
+    ServiceStateChange,
 )
 from .ssh.config_exec import ConfigExecutor
 from .ssh.executor import SSHExecutor
@@ -84,11 +87,15 @@ def _mitigation_action_kind(action_name: str) -> str:
     """Classify the action a mitigation references, for read-only listing."""
     if action_name in CATALOG:
         return "command"
-    action = CONFIG_ACTIONS.get(action_name)
+    action = PRIMITIVE_ACTIONS.get(action_name)
     if isinstance(action, (DropInWrite, DropInRemove)):
         return "config-dropin"
     if isinstance(action, (ConfigBlockWrite, ConfigBlockRemove)):
         return "config-edit"
+    if isinstance(action, (ModuleBlacklist, ModuleUnblacklist)):
+        return "kernel-module"
+    if isinstance(action, ServiceStateChange):
+        return "service"
     return "unknown"
 
 
@@ -462,7 +469,7 @@ def build_engine(
     # Mitigation catalogue: built-ins + any operator folder, each entry's action
     # validated against the reviewed allowlist (catalog commands + config actions);
     # a file can reference one but can't define a new one.
-    _allowed = set(CATALOG) | set(CONFIG_ACTIONS)
+    _allowed = set(CATALOG) | set(PRIMITIVE_ACTIONS)
     mitigations = load_mitigations(mitigations_dir, allowed_templates=_allowed)
 
     tools = ToolRegistry()
@@ -471,7 +478,7 @@ def build_engine(
     tools.register(make_mitigation_tool(ssh_executor, conn_resolver,
                                         mitigations=mitigations.by_id,
                                         config_executor=ConfigExecutor(ssh_executor),
-                                        config_actions=CONFIG_ACTIONS))
+                                        config_actions=PRIMITIVE_ACTIONS))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))

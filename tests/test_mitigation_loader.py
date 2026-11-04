@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 from ai_defense.composition import build_demo_engine
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
-from ai_defense.ssh.catalog import CATALOG, CONFIG_ACTIONS
+from ai_defense.ssh.catalog import CATALOG, PRIMITIVE_ACTIONS
 from ai_defense.vuln.mitigations import load_mitigations
 
-ALLOWED = set(CATALOG) | set(CONFIG_ACTIONS)   # commands + config actions
+ALLOWED = set(CATALOG) | set(PRIMITIVE_ACTIONS)   # commands + all managed-primitive actions
 _OK_T = "harden.disable_pkexec_suid"
 _OK_R = "harden.restore_pkexec_suid"
 
@@ -96,6 +96,8 @@ def test_shipped_mitigations_folder_is_valid():
     assert reg.for_cve("CVE-2023-44487").mitigation_id == "http2-rapid-reset-nginx"
     assert reg.for_cve("PHP-SESSION-UPLOAD-PROGRESS").mitigation_id == \
         "php-disable-session-upload-progress"
+    assert reg.for_cve("CVE-2017-6074").mitigation_id == "disable-dccp-module"   # kernel module
+    assert reg.for_cve("CVE-2017-8779").mitigation_id == "disable-rpcbind"       # service
     assert reg.for_cve("CVE-2019-11479") is not None
     assert reg.for_cve("MPTCP") is not None                # mptcp hardening
 

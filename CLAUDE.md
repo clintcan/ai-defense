@@ -225,14 +225,23 @@ record — and internal error text is never surfaced to the planner.
   Published mitigations come from an **auditable catalogue** — the built-ins in
   `vuln/mitigations.py` plus an operator **mitigations folder** (`--mitigations-dir`;
   yaml/json, one or many per file), merged by id. Each entry cites its advisory
-  (rule #6) and names an **allowlisted action** to apply and one to reverse it —
-  either a fixed catalog **command** (`ssh/catalog/`), a managed **config drop-in**
-  (`ssh/catalog/configs.py`: a reviewed file written into an allowlisted conf.d
-  directory via `sudo -n tee`, validated and reloaded, reversed by deleting it), or
-  an **in-place marker-delimited block edit** of an allowlisted file (read, backed
-  up, diffed, written, validated with `sshd -t`/etc., reloaded, and **restored from
-  backup if validation fails** — the 6a dance; reversed by removing the block). The
-  loader **rejects** any entry whose action isn't already reviewed, so a
+  (rule #6) and names an **allowlisted action** to apply and one to reverse it. An
+  action is one of the reviewed catalog categories (each a module under
+  `ssh/catalog/`, merged into `PRIMITIVE_ACTIONS`):
+  - a fixed catalog **command** (`packages`/`hardening`);
+  - a managed **config drop-in** (`configs.py`: a reviewed file written into an
+    allowlisted conf.d dir via `sudo -n tee`, optionally validated — e.g. `nginx -t`
+    — and reloaded, reversed by deleting it);
+  - an **in-place marker-delimited block edit** of an allowlisted file (read, backed
+    up, diffed, written, validated with `sshd -t`/etc., reloaded, and **restored from
+    backup if validation fails** — the 6a dance; reversed by removing the block);
+  - a **kernel-module** action (`modules.py`: blacklist/unblacklist a module whose
+    name is on `HARDENING_MODULE_ALLOWLIST` — `/etc/modprobe.d` drop-in + `modprobe -r`);
+  - a **service** action (`services.py`: `systemctl disable/mask/enable`,
+    **denylist-first** so a `PROTECTED_SERVICES` unit — auditd/firewalld/ufw/sshd/… —
+    can never be disabled, even with approval).
+
+  The loader **rejects** any entry whose action isn't already reviewed, so a
   dropped file can map a CVE to an existing action but can never introduce a new
   command (rules #3/#5). Applying one is the approval-gated **`mitigate`** tool: it
   dry-runs / validates first and records a rollback (CVE-2021-4034/PwnKit strips

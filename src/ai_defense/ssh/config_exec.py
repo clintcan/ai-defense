@@ -28,8 +28,11 @@ from .catalog import (
     dir_allowed,
     edit_path_allowed,
 )
+from .catalog.modules import ModuleBlacklist, ModuleUnblacklist
+from .catalog.services import ServiceStateChange
 from .config_edit import ensure_block, remove_block
 from .executor import ExecOutcome, SSHExecutor
+from .hardening import HARDENING_MODULE_ALLOWLIST, ServiceAction
 
 
 class ConfigExecutor:
@@ -44,6 +47,10 @@ class ConfigExecutor:
             return self._remove(action, host=host, key=key, user=user, port=port)
         if isinstance(action, (ConfigBlockWrite, ConfigBlockRemove)):
             return self._edit(action, host=host, key=key, user=user, port=port)
+        if isinstance(action, (ModuleBlacklist, ModuleUnblacklist)):
+            return self._module(action, host=host, key=key, user=user, port=port)
+        if isinstance(action, ServiceStateChange):
+            return self._service(action, host=host, key=key, user=user, port=port)
         return ExecOutcome(applied=False, resolved_command="",
                            blocked_reason=f"unknown config action: {type(action).__name__}")
 
@@ -150,3 +157,64 @@ class ConfigExecutor:
         if a.reload:
             _run(list(a.reload))
         return ExecOutcome(applied=True, resolved_command=label, result=w_out, diff=diff)
+
+    # -- kernel modules ---------------------------------------------------
+
+    def _module(self, a, *, host, key, user, port) -> ExecOutcome:
+        # Defense in depth: re-check the allowlist even though it was verified at
+        # import — a reviewed action can never blacklist an arbitrary module.
+        if a.module not in HARDENING_MODULE_ALLOWLIST:
+            return ExecOutcome(applied=False, resolved_command=f"module {a.module}",
+                               blocked_reason=f"module not on the hardening allowlist: {a.module}")
+        if isinstance(a, ModuleUnblacklist):
+            cmd = f"un-blacklist {a.module} (remove {a.path})"
+            out, reason = self._ex.run_one(host, ["sudo", "-n", "rm", "-f", a.path],
+                                           key=key, user=user, port=port)
+            if out is None:
+                return ExecOutcome(applied=False, resolved_command=cmd, blocked_reason=reason)
+            ok = out.exit_code == 0
+            why = None if ok else f"remove failed (exit {out.exit_code})"
+            return ExecOutcome(applied=ok, resolved_command=cmd, result=out, blocked_reason=why)
+        # ModuleBlacklist: write the drop-in, then unload at runtime (best-effort).
+        cmd = f"blacklist {a.module} ({a.path})"
+        content = (f"# AI Defense: disable kernel module {a.module} (attack-surface reduction)\n"
+                   f"blacklist {a.module}\n"
+                   f"install {a.module} /bin/true\n")
+        out, reason = self._ex.run_one(host, ["sudo", "-n", "tee", a.path],
+                                       key=key, user=user, port=port, input=content)
+        if out is None:
+            return ExecOutcome(applied=False, resolved_command=cmd, blocked_reason=reason)
+        if out.exit_code != 0:
+            return ExecOutcome(applied=False, resolved_command=cmd, result=out,
+                               blocked_reason=f"write failed (exit {out.exit_code})")
+        # Runtime unload: a module in use can't be removed now, but the drop-in
+        # already blocks it at next boot — report, don't roll back.
+        u_out, _ = self._ex.run_one(host, ["sudo", "-n", "modprobe", "-r", a.module],
+                                    key=key, user=user, port=port)
+        note = None if (u_out is not None and u_out.exit_code == 0) else \
+            "blacklist persisted; runtime unload deferred (module in use or absent)"
+        return ExecOutcome(applied=True, resolved_command=cmd, result=out, diff=note)
+
+    # -- services ---------------------------------------------------------
+
+    def _service(self, a, *, host, key, user, port) -> ExecOutcome:
+        cmd = f"systemctl {a.action.value} {a.unit}"
+        if a.is_blocked():
+            return ExecOutcome(applied=False, resolved_command=cmd,
+                               blocked_reason=f"protected unit — refused: {a.unit}")
+        argv_by_action = {
+            ServiceAction.DISABLE: ["systemctl", "disable", "--now", a.unit],
+            ServiceAction.MASK: ["systemctl", "mask", a.unit],
+            ServiceAction.ENABLE: ["systemctl", "enable", "--now", a.unit],
+        }
+        tail = argv_by_action.get(a.action)
+        if tail is None:        # UNMASK / START / STOP not exposed as catalog actions
+            return ExecOutcome(applied=False, resolved_command=cmd,
+                               blocked_reason=f"unsupported service action: {a.action.value}")
+        out, reason = self._ex.run_one(host, ["sudo", "-n", *tail],
+                                       key=key, user=user, port=port)
+        if out is None:
+            return ExecOutcome(applied=False, resolved_command=cmd, blocked_reason=reason)
+        ok = out.exit_code == 0
+        return ExecOutcome(applied=ok, resolved_command=cmd, result=out,
+                           blocked_reason=None if ok else f"{cmd} failed (exit {out.exit_code})")

@@ -48,7 +48,8 @@ from .registry.assets import Asset, AssetRegistry, Authorization
 from .report import ReportProvenance, build_report, write_report
 from .report.model import Report
 from .scanner.scanner import AuthenticatedScanner, HostFindings
-from .ssh.catalog import CATALOG
+from .ssh.catalog import CATALOG, CONFIG_ACTIONS
+from .ssh.config_exec import ConfigExecutor
 from .ssh.executor import SSHExecutor
 from .ssh.tools import (
     make_mitigation_tool,
@@ -407,15 +408,19 @@ def build_engine(
     the_transport = transport or SimulatedSSHTransport()
     conn_resolver = registry_connection_resolver(registry, clock=clock)
 
-    # Mitigation catalogue: built-ins + any operator folder, each entry's command
-    # validated against the reviewed catalog allowlist (a file can't add a new one).
-    mitigations = load_mitigations(mitigations_dir, allowed_templates=set(CATALOG))
+    # Mitigation catalogue: built-ins + any operator folder, each entry's action
+    # validated against the reviewed allowlist (catalog commands + config actions);
+    # a file can reference one but can't define a new one.
+    _allowed = set(CATALOG) | set(CONFIG_ACTIONS)
+    mitigations = load_mitigations(mitigations_dir, allowed_templates=_allowed)
 
     tools = ToolRegistry()
     ssh_executor = SSHExecutor(the_transport)
     tools.register(make_security_update_tool(ssh_executor, conn_resolver))
     tools.register(make_mitigation_tool(ssh_executor, conn_resolver,
-                                        mitigations=mitigations.by_id))
+                                        mitigations=mitigations.by_id,
+                                        config_executor=ConfigExecutor(ssh_executor),
+                                        config_actions=CONFIG_ACTIONS))
     tools.register(make_ec2_discovery_tool(client_factory))
     tools.register(make_lightsail_discovery_tool(client_factory))
     tools.register(make_patch_state_tool(client_factory))

@@ -1,16 +1,18 @@
-# Multipath TCP attack-surface reduction. MPTCP is rarely needed on servers and
-# has carried kernel CVEs; disabling it removes that surface. This is defense in
-# depth, not a single-CVE fix, so it's keyed under a plain hardening id (not a
-# CVE) — run it with:  mitigate <host> MPTCP
+# Multipath TCP attack-surface reduction, done as a persistent config drop-in:
+# writes net.mptcp.enabled=0 to /etc/sysctl.d/ and applies it with `sysctl -p`
+# (so it takes effect now AND survives reboot). Reverse removes the drop-in.
+# This is defense in depth, not a single-CVE fix, so it's keyed under a plain
+# hardening id (not a CVE) — run it with:  mitigate <host> MPTCP
 #
-# Both commands are allowlisted in the reviewed catalog (ssh/catalog/).
+# Both actions are allowlisted config actions in the reviewed catalog
+# (ssh/catalog/configs.py); a file may reference one but can't define a new one.
 - id: mptcp-disable
   cves: [MPTCP]
-  title: Disable Multipath TCP (net.mptcp.enabled=0)
+  title: Disable Multipath TCP persistently (/etc/sysctl.d drop-in)
   source_ref: https://docs.kernel.org/networking/mptcp-sysctl.html
-  template: harden.disable_mptcp
-  rollback_template: harden.enable_mptcp
+  template: config.sysctl_mptcp_off
+  rollback_template: config.sysctl_mptcp_off.remove
   description: >-
-    runtime sysctl net.mptcp.enabled=0 (reverse: =1); persist across reboot via
-    a drop-in in /etc/sysctl.d. The dry-run reads the key first, so a kernel
-    without MPTCP aborts rather than erroring blindly.
+    write net.mptcp.enabled=0 to /etc/sysctl.d/80-ai-defense-mptcp.conf and apply
+    it (sysctl -p); reverse removes the drop-in and reloads. The write runs via
+    'sudo -n tee'; the reload doubles as validation and rolls back on failure.

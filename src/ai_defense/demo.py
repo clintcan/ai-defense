@@ -59,8 +59,9 @@ class SimulatedSSHTransport:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    def run(self, host, argv, *, key, timeout, user="root", port=22) -> CommandOutput:
-        self.calls.append((host, user, port, tuple(argv)))
+    def run(self, host, argv, *, key, timeout, user="root", port=22,
+            input=None) -> CommandOutput:
+        self.calls.append((host, user, port, tuple(argv), input))
         return CommandOutput(0, f"[sim] {user}@{host}:{port} ran: {' '.join(argv)}", "")
 
 

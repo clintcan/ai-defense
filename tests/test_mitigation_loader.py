@@ -6,10 +6,10 @@ from datetime import UTC, datetime, timedelta
 
 from ai_defense.composition import build_demo_engine
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
-from ai_defense.ssh.catalog import CATALOG
+from ai_defense.ssh.catalog import CATALOG, CONFIG_ACTIONS
 from ai_defense.vuln.mitigations import load_mitigations
 
-ALLOWED = set(CATALOG)
+ALLOWED = set(CATALOG) | set(CONFIG_ACTIONS)   # commands + config actions
 _OK_T = "harden.disable_pkexec_suid"
 _OK_R = "harden.restore_pkexec_suid"
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from . import hardening, packages
 from ._template import CommandTemplate, render_argv
+from .configs import ALLOWED_DROPIN_DIRS, CONFIG_ACTIONS, DropInRemove, DropInWrite, dir_allowed
 
 
 def _merge(*categories: dict[str, CommandTemplate]) -> dict[str, CommandTemplate]:
@@ -32,4 +33,6 @@ def _merge(*categories: dict[str, CommandTemplate]) -> dict[str, CommandTemplate
 
 CATALOG: dict[str, CommandTemplate] = _merge(packages.TEMPLATES, hardening.TEMPLATES)
 
-__all__ = ["CATALOG", "CommandTemplate", "render_argv"]
+__all__ = ["CATALOG", "CommandTemplate", "render_argv",
+           "CONFIG_ACTIONS", "DropInWrite", "DropInRemove", "dir_allowed",
+           "ALLOWED_DROPIN_DIRS"]

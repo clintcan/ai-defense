@@ -45,9 +45,15 @@ mapping with a top-level `mitigations:` list. Fields:
 
 | file | mitigation | command (allowlisted) |
 |------|------------|------------------------|
-| `pwnkit.yaml` | CVE-2021-4034 (PwnKit): strip setuid from `pkexec` | `harden.disable_pkexec_suid` |
-| `tcp-sack-panic.yaml` | CVE-2019-11477/11478/11479 (SACK Panic): disable TCP SACK | `harden.disable_tcp_sack` |
-| `mptcp.yaml` | Disable Multipath TCP (attack-surface reduction) | `harden.disable_mptcp` |
+| `pwnkit.yaml` | CVE-2021-4034 (PwnKit): strip setuid from `pkexec` | command `harden.disable_pkexec_suid` |
+| `tcp-sack-panic.yaml` | CVE-2019-11477/11478/11479 (SACK Panic): disable TCP SACK | command `harden.disable_tcp_sack` |
+| `mptcp.yaml` | Disable Multipath TCP persistently | config drop-in `config.sysctl_mptcp_off` |
+
+A `template`/`rollback_template` may name a **command** (a fixed argv in
+`ssh/catalog/`) or a **config action** (a managed drop-in in
+`ssh/catalog/configs.py`, which writes/validates/reloads a file under an
+allowlisted dir and is reversed by deleting it). Either way it must already be
+reviewed in the catalog.
 
 Each is a single-mitigation file; put several in one file as a YAML/JSON list if
 you prefer. All are runtime changes (reversible); persist a sysctl one across

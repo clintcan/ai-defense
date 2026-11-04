@@ -106,7 +106,8 @@ class ParamikoTransport:
         self._passphrase = key_passphrase
 
     def run(self, host: str, argv: list[str], *, key: str, timeout: int,
-            user: str = "root", port: int = 22) -> CommandOutput:
+            user: str = "root", port: int = 22,
+            input: str | None = None) -> CommandOutput:
         import paramiko
 
         client = paramiko.SSHClient()
@@ -126,8 +127,11 @@ class ParamikoTransport:
             # Build a single command string from argv with proper shell quoting;
             # argv came from the allowlist catalog, never free-form planner text.
             command = " ".join(shlex.quote(a) for a in argv)
-            _stdin, stdout, stderr = client.exec_command(
+            stdin, stdout, stderr = client.exec_command(
                 command, timeout=timeout, get_pty=False)
+            if input is not None:
+                stdin.write(input)
+                stdin.channel.shutdown_write()   # signal EOF so the command proceeds
             out = stdout.read().decode("utf-8", "replace")
             err = stderr.read().decode("utf-8", "replace")
             code = stdout.channel.recv_exit_status()

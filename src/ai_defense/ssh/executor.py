@@ -34,10 +34,14 @@ class CommandOutput:
 
 class Transport(Protocol):
     """Executes an argv on a host over SSH. MUST use ``key`` only to connect,
-    never log it, and run non-interactively (no TTY)."""
+    never log it, and run non-interactively (no TTY). ``input`` (when given) is
+    written to the command's stdin and the write side closed — used to feed a
+    config file's body to ``sudo -n tee <path>`` so a privileged write needs no
+    shell redirection or sftp."""
 
     def run(self, host: str, argv: list[str], *, key: str, timeout: int,
-            user: str = "root", port: int = 22) -> CommandOutput: ...
+            user: str = "root", port: int = 22,
+            input: str | None = None) -> CommandOutput: ...
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,20 @@ class SSHExecutor:
 
         result = _run(argv)
         return ExecOutcome(applied=True, resolved_command=cmd, dry_run=dry, result=result)
+
+    def run_one(self, host: str, argv: list[str], *, key: str, user: str = "root",
+                port: int = 22, input: str | None = None
+                ) -> tuple[CommandOutput | None, str | None]:
+        """Run a single argv through the denylist and output cap (optionally with
+        stdin ``input``). Returns ``(output, None)`` or ``(None, reason)`` when the
+        denylist refuses it. For managed config primitives, whose argv is built
+        from a reviewed operation rather than a catalog template."""
+        cmd = shlex.join(argv)
+        if is_denied(cmd):
+            return None, "denylist: destructive pattern"
+        out = self._cap(self._transport.run(
+            host, argv, key=key, timeout=self._timeout_s, user=user, port=port, input=input))
+        return out, None
 
     def _cap(self, out: CommandOutput) -> CommandOutput:
         if len(out.stdout) <= self._max_output and len(out.stderr) <= self._max_output:

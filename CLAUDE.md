@@ -225,14 +225,17 @@ record — and internal error text is never surfaced to the planner.
   Published mitigations come from an **auditable catalogue** — the built-ins in
   `vuln/mitigations.py` plus an operator **mitigations folder** (`--mitigations-dir`;
   yaml/json, one or many per file), merged by id. Each entry cites its advisory
-  (rule #6) and names an **allowlisted** catalog command to apply and one to
-  reverse it; the loader **rejects** any entry whose command isn't already in the
-  reviewed catalog, so a dropped file can map a CVE to an existing command but can
-  never introduce a new one (rules #3/#5). Applying one is the approval-gated
-  **`mitigate`** tool: it dry-runs first and records a rollback (for
-  CVE-2021-4034/PwnKit it strips the setuid bit from `/usr/bin/pkexec`, reversed
-  by restoring it). Use it where the vendor patch can't be installed (an EOL OS
-  without ESM); an uncatalogued CVE escalates to a human instead.
+  (rule #6) and names an **allowlisted action** to apply and one to reverse it —
+  either a fixed catalog **command** (`ssh/catalog/`) or a managed **config
+  drop-in** (`ssh/catalog/configs.py`: a reviewed file written into an allowlisted
+  conf.d directory via `sudo -n tee`, validated and reloaded, reversed by deleting
+  it). The loader **rejects** any entry whose action isn't already reviewed, so a
+  dropped file can map a CVE to an existing action but can never introduce a new
+  command (rules #3/#5). Applying one is the approval-gated **`mitigate`** tool: it
+  dry-runs / validates first and records a rollback (CVE-2021-4034/PwnKit strips
+  the setuid bit from `/usr/bin/pkexec`; the MPTCP sample writes a sysctl drop-in).
+  Use it where the vendor patch can't be installed (an EOL OS without ESM); an
+  uncatalogued CVE escalates to a human instead.
 - **Remediation is not only package installs.** Mitigation and hardening
   frequently means *changing system configuration*. Supported remediation action
   types:

@@ -28,6 +28,9 @@ SECURITY_UPDATE_TOOL = "patch.apply_security_update"
 MITIGATION_TOOL = "mitigation.apply_hardening"
 OS_UPGRADE_TOOL = "os.release_upgrade"
 
+# do-release-upgrade runs far longer than the default 60s command timeout.
+OS_UPGRADE_TIMEOUT_S = 3600
+
 ConnectionResolver = Callable[[str], ConnectionInfo]
 
 
@@ -284,8 +287,10 @@ def make_os_upgrade_tool(
                    "payload": rollback.payload}
 
         # 1. In-place release upgrade (dry-run `-c` first: is a new release available?).
+        #    Long timeout: the upgrade itself can run for many minutes.
         up = executor.run_template(conn.host, "os.do_release_upgrade", {}, key=key,
-                                   user=conn.user, port=conn.port, dry_run_first=True)
+                                   user=conn.user, port=conn.port, dry_run_first=True,
+                                   timeout=OS_UPGRADE_TIMEOUT_S)
         if not up.applied:
             return ToolResult(
                 ok=False, tool=OS_UPGRADE_TOOL,
@@ -305,20 +310,32 @@ def make_os_upgrade_tool(
                 resolved_command=up.resolved_command)
 
         # 2. Reboot into the upgraded system. A dropped SSH session during reboot
-        #    is expected and counts as success — the workflow confirms via reconnect.
+        #    is expected and counts as success; a clean exit 0 does too. But a
+        #    definite non-zero exit (e.g. sudo refused) WITHOUT the connection
+        #    dropping means the host did not reboot — don't report success, so the
+        #    workflow halts with the snapshot retained rather than falsely claiming
+        #    the host rebooted onto the new kernel.
         try:
             rb = executor.run_template(conn.host, "os.reboot", {}, key=key,
                                        user=conn.user, port=conn.port, dry_run_first=False)
-            reboot_issued = (not rb.applied) or (rb.result is None) or (rb.result.exit_code == 0)
         except Exception:  # noqa: BLE001 - reboot severs the connection; that's success
-            reboot_issued = True
+            rb = None
+        if rb is not None and rb.result is not None and rb.result.exit_code != 0:
+            return ToolResult(
+                ok=False, tool=OS_UPGRADE_TOOL,
+                summary=(f"release upgrade applied on {asset_id} but the reboot could not be "
+                         f"issued (exit {rb.result.exit_code}); host NOT rebooted"),
+                data={"asset_id": asset_id, "target_version": target,
+                      "upgrade_exit": res.exit_code, "reboot_issued": False,
+                      "reboot_exit": rb.result.exit_code, "rollback": rb_json},
+                resolved_command=up.resolved_command)
 
         return ToolResult(
             ok=True, tool=OS_UPGRADE_TOOL,
             summary=(f"release upgrade applied on {asset_id}; reboot issued"
                      + (f" (target {target})" if target else "")),
             data={"asset_id": asset_id, "target_version": target,
-                  "upgrade_exit": res.exit_code, "reboot_issued": reboot_issued,
+                  "upgrade_exit": res.exit_code, "reboot_issued": True,
                   "rollback": rb_json},
             resolved_command=up.resolved_command)
 

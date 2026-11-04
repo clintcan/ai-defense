@@ -405,6 +405,7 @@ def handle_call(engine: Engine, name: str, arguments: dict[str, Any]) -> dict[st
                 "target_version": r.preflight.target_version if r.preflight else None,
                 "snapshot_ids": r.snapshot_ids,
                 "reconnected": r.reconnected, "post_os": r.post_os,
+                "upgrade_summary": r.upgrade.summary if r.upgrade else None,
                 "notes": r.notes,
             }
             if r.status == "upgrade_pending":

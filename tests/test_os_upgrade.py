@@ -10,7 +10,8 @@ from ai_defense.composition import build_demo_engine
 from ai_defense.mcp_server import handle_call
 from ai_defense.registry.assets import Asset, Authorization, ConnectionInfo
 from ai_defense.scanner.scanner import HostFindings
-from ai_defense.ssh.tools import OS_UPGRADE_TOOL
+from ai_defense.ssh.executor import CommandOutput, SSHExecutor
+from ai_defense.ssh.tools import OS_UPGRADE_TIMEOUT_S, OS_UPGRADE_TOOL, make_os_upgrade_tool
 from ai_defense.toolset.intents import ActionClass, ToolResult
 from ai_defense.upgrade.preflight import OsUpgradePreflight
 from ai_defense.upgrade.workflow import (
@@ -186,6 +187,78 @@ def test_engine_fleet_blocked_until_a_canary_is_healthy():
     eng.os_upgrade("fl-h", canary=False, existing_snapshot_ids=g.snapshot_ids)  # marks precondition
     g3 = eng.os_upgrade("fl-h", canary=False, existing_snapshot_ids=g.snapshot_ids)
     assert g3.upgrade and g3.upgrade.ok                      # now clears and applies
+
+
+# --- the os.release_upgrade tool: upgrade + reboot, long timeout ---------
+
+class _UpgradeTransport:
+    """exec stub keyed on argv: dry-run `-c`, apply `-f`, and reboot."""
+
+    def __init__(self, *, dryrun_exit=0, upgrade_exit=0, reboot="ok"):
+        self.dryrun_exit = dryrun_exit
+        self.upgrade_exit = upgrade_exit
+        self.reboot = reboot            # "ok" | "refused" | "drop"
+        self.calls: list = []
+
+    def run(self, host, argv, *, key, timeout, user="root", port=22, input=None):
+        self.calls.append((tuple(argv), timeout))
+        a = " ".join(argv)
+        if "do-release-upgrade -c" in a:
+            return CommandOutput(self.dryrun_exit, "", "")
+        if "do-release-upgrade -f" in a:
+            return CommandOutput(self.upgrade_exit, "upgrade log...", "")
+        if "systemctl reboot" in a:
+            if self.reboot == "drop":
+                raise OSError("connection dropped by reboot")
+            return CommandOutput(0 if self.reboot == "ok" else 1, "", "reboot refused")
+        return CommandOutput(0, "", "")
+
+
+def _os_tool(tp):
+    spec = make_os_upgrade_tool(
+        SSHExecutor(tp), lambda _a: ConnectionInfo(host="h", key_ref="k", user="ubuntu"))
+    return spec.executor
+
+
+def test_tool_happy_upgrade_then_reboot_uses_long_timeout():
+    tp = _UpgradeTransport(reboot="ok")
+    res = _os_tool(tp)({"asset_id": "h", "target_version": "20.04", "snapshot_id": "snap-1"},
+                       resolve_secret=lambda _r: "KEY")
+    assert res.ok and res.data["reboot_issued"] is True
+    assert res.data["rollback"]["payload"]["snapshot_id"] == "snap-1"
+    # the upgrade (and its -c dry-run) ran with the long timeout, not the default 60s
+    up = next(t for (argv, t) in tp.calls if "do-release-upgrade" in " ".join(argv)
+              and "-f" in argv)
+    assert up == OS_UPGRADE_TIMEOUT_S
+
+
+def test_tool_reboot_refused_is_not_reported_as_success():
+    tp = _UpgradeTransport(reboot="refused")      # sudo refused, connection did NOT drop
+    res = _os_tool(tp)({"asset_id": "h", "target_version": "20.04", "snapshot_id": "snap-1"},
+                       resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "reboot could not be issued" in res.summary
+    assert res.data["reboot_issued"] is False and res.data["rollback"]["payload"]["snapshot_id"]
+
+
+def test_tool_reboot_dropping_connection_is_success():
+    tp = _UpgradeTransport(reboot="drop")         # reboot severs SSH -> expected success
+    res = _os_tool(tp)({"asset_id": "h"}, resolve_secret=lambda _r: "KEY")
+    assert res.ok and res.data["reboot_issued"] is True
+
+
+def test_tool_no_upgrade_available_aborts_before_changing_anything():
+    tp = _UpgradeTransport(dryrun_exit=1)         # `do-release-upgrade -c` says none available
+    res = _os_tool(tp)({"asset_id": "h"}, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "not applied" in res.summary
+    assert not any("-f" in argv for (argv, _t) in tp.calls)      # apply never ran
+    assert not any("systemctl reboot" in " ".join(argv) for (argv, _t) in tp.calls)
+
+
+def test_tool_upgrade_command_failure_does_not_reboot():
+    tp = _UpgradeTransport(upgrade_exit=1)
+    res = _os_tool(tp)({"asset_id": "h"}, resolve_secret=lambda _r: "KEY")
+    assert not res.ok and "command failed" in res.summary
+    assert not any("systemctl reboot" in " ".join(argv) for (argv, _t) in tp.calls)
 
 
 def test_mcp_os_upgrade_pending_shape():

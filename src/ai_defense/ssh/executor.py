@@ -64,14 +64,17 @@ class SSHExecutor:
 
     def run_template(self, host: str, template_name: str, params: dict, *,
                      key: str, user: str = "root", port: int = 22,
-                     dry_run_first: bool = True) -> ExecOutcome:
+                     dry_run_first: bool = True, timeout: int | None = None) -> ExecOutcome:
         template: CommandTemplate = CATALOG[template_name]   # KeyError if not allowlisted
         argv = template.render(params)
         cmd = shlex.join(argv)
+        # Per-call override for long-running commands (e.g. do-release-upgrade,
+        # which far exceeds the default 60s); defaults to the executor's timeout.
+        run_timeout = self._timeout_s if timeout is None else timeout
 
         def _run(a):
             return self._cap(self._transport.run(
-                host, a, key=key, timeout=self._timeout_s, user=user, port=port))
+                host, a, key=key, timeout=run_timeout, user=user, port=port))
 
         # Denylist wins even over anything the catalog produced.
         if is_denied(cmd):

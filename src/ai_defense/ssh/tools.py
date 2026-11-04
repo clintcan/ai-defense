@@ -194,6 +194,7 @@ def make_mitigation_tool(
                 "asset_id": asset_id, "mitigation_id": mitigation_id,
                 "exit_code": res.exit_code if res else None,
                 "stdout": res.stdout if res else "",
+                "stderr": res.stderr if res else "",
                 "rollback": {"kind": rollback.kind.value,
                              "description": rollback.description,
                              "payload": rollback.payload},

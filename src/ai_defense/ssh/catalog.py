@@ -74,32 +74,36 @@ CATALOG: dict[str, CommandTemplate] = {
         "dnf.updateinfo", ["dnf", "updateinfo", "list", "security"], read_only=True,
     ),
     # --- mutating (approval-gated), each with a dry-run variant ----------
+    # The APPLY step runs under `sudo -n`: cloud images log in as a non-root user
+    # (ubuntu/bitnami/ec2-user) with passwordless sudo, so a privileged change
+    # needs sudo, and `-n` fails fast (never hangs on a password prompt) where it
+    # isn't configured. Dry-runs stay unprivileged — they only read / simulate.
     "apt.install_security": CommandTemplate(
         "apt.install_security",
-        ["apt-get", "install", "--only-upgrade", "-y", "{package}"],
+        ["sudo", "-n", "apt-get", "install", "--only-upgrade", "-y", "{package}"],
         read_only=False,
         dry_run_variant=["apt-get", "install", "--only-upgrade", "--simulate", "{package}"],
     ),
     "dnf.upgrade_security": CommandTemplate(
         "dnf.upgrade_security",
-        ["dnf", "upgrade", "-y", "--security", "{package}"],
+        ["sudo", "-n", "dnf", "upgrade", "-y", "--security", "{package}"],
         read_only=False,
         dry_run_variant=["dnf", "upgrade", "--assumeno", "--security", "{package}"],
     ),
     # --- hardening mitigations (approval-gated), fixed target, reversible ----
     # CVE-2021-4034 (PwnKit): strip / restore the setuid bit on pkexec. Fixed
     # argv on a fixed path (no parameters) -> no injection surface. The dry-run
-    # just reads the current mode so the approver sees state and a missing binary
-    # aborts the apply.
+    # just reads the current mode (unprivileged) so the approver sees state and a
+    # missing binary aborts the apply.
     "harden.disable_pkexec_suid": CommandTemplate(
         "harden.disable_pkexec_suid",
-        ["chmod", "0755", "/usr/bin/pkexec"],
+        ["sudo", "-n", "chmod", "0755", "/usr/bin/pkexec"],
         read_only=False,
         dry_run_variant=["stat", "-c", "%a %n", "/usr/bin/pkexec"],
     ),
     "harden.restore_pkexec_suid": CommandTemplate(
         "harden.restore_pkexec_suid",
-        ["chmod", "4755", "/usr/bin/pkexec"],
+        ["sudo", "-n", "chmod", "4755", "/usr/bin/pkexec"],
         read_only=False,
         dry_run_variant=["stat", "-c", "%a %n", "/usr/bin/pkexec"],
     ),

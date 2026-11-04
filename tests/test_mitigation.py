@@ -36,8 +36,9 @@ def test_mitigation_table_is_cited():
 def test_catalog_commands_are_fixed_and_reversible():
     disable = CATALOG["harden.disable_pkexec_suid"]
     restore = CATALOG["harden.restore_pkexec_suid"]
-    assert disable.render({}) == ["chmod", "0755", "/usr/bin/pkexec"]
-    assert restore.render({}) == ["chmod", "4755", "/usr/bin/pkexec"]
+    # apply runs under sudo -n (cloud users aren't root); dry-run only reads.
+    assert disable.render({}) == ["sudo", "-n", "chmod", "0755", "/usr/bin/pkexec"]
+    assert restore.render({}) == ["sudo", "-n", "chmod", "4755", "/usr/bin/pkexec"]
     assert disable.render_dry_run({}) == ["stat", "-c", "%a %n", "/usr/bin/pkexec"]
 
 
@@ -61,8 +62,8 @@ def test_mitigation_tool_applies_and_records_rollback():
                         resolve_secret=lambda ref: "KEY")
     assert res.ok and res.data["mitigation_id"] == "pwnkit-pkexec-suid"
     assert res.data["rollback"]["payload"]["rollback_template"] == "harden.restore_pkexec_suid"
-    assert res.resolved_command == "chmod 0755 /usr/bin/pkexec"
-    assert ("stat", "-c", "%a %n", "/usr/bin/pkexec") in tp.argv   # dry-run ran first
+    assert res.resolved_command == "sudo -n chmod 0755 /usr/bin/pkexec"
+    assert ("stat", "-c", "%a %n", "/usr/bin/pkexec") in tp.argv   # unprivileged dry-run ran first
 
 
 def test_mitigation_tool_refuses_unknown_id():

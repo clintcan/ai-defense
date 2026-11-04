@@ -23,11 +23,12 @@ up.
 8. [Step 5 — Tell it about your servers](#8-step-5--tell-it-about-your-servers-onboarding)
 9. [Step 6 — Everyday use](#9-step-6--everyday-use)
 10. [Step 7 — Approving changes](#10-step-7--approving-changes)
-11. [Fixing a server's details later](#11-fixing-a-servers-details-later)
-12. [Understanding the reports](#12-understanding-the-reports)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Glossary](#14-glossary)
-15. [Where to find more detail](#15-where-to-find-more-detail)
+11. [When a patch isn't available — mitigations](#11-when-a-patch-isnt-available--mitigations)
+12. [Fixing a server's details later](#12-fixing-a-servers-details-later)
+13. [Understanding the reports](#13-understanding-the-reports)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Glossary](#15-glossary)
+16. [Where to find more detail](#16-where-to-find-more-detail)
 
 ---
 
@@ -262,6 +263,7 @@ options after `mcp`:
 | `--osv --kev` | check against live vulnerability data + "actively exploited" alerts |
 | `--aws-region us-east-1` | manage AWS cloud servers |
 | `--known-hosts "C:\Users\you\.ssh\known_hosts"` | verify server identities (recommended) |
+| `--mitigations-dir "C:\path\to\ai_defense\mitigations"` | add your own cited mitigation workarounds (see [§11](#11-when-a-patch-isnt-available--mitigations)) |
 
 A full real-server line looks like:
 
@@ -323,12 +325,15 @@ Once servers are onboarded, just talk to Claude. Useful things to say:
 | "List the servers you can manage." | Shows your inventory. |
 | "Scan web-01." | Reads what's installed (read-only, automatic). |
 | "What needs patching on web-01, most urgent first?" | A prioritized plan — actively-exploited issues at the top. |
-| "Write me a report for all my servers." | Produces the four report files ([explained below](#12-understanding-the-reports)). |
+| "What mitigations can you apply?" | Lists cited, reversible workarounds for flaws you can't patch yet (read-only). |
+| "Write me a report for all my servers." | Produces the four report files ([explained below](#13-understanding-the-reports)). |
 | "Is web-01 due for an OS upgrade?" | A read-only "preflight" assessment. |
 | "Patch openssl on web-01." | Proposes the fix and **waits for your approval**. |
+| "web-01 can't be patched — mitigate CVE-2021-4034." | Proposes an official workaround and **waits for your approval** ([more](#11-when-a-patch-isnt-available--mitigations)). |
 
-Nothing in the first five rows changes anything — they're safe to run anytime.
-Only the last row (patching) needs approval, covered next.
+Everything except the last two rows is read-only and safe to run anytime. Only
+patching and mitigating change a server, and both need your approval — covered
+next.
 
 ---
 
@@ -352,7 +357,39 @@ always say *"show me the audit log"* to see what happened.
 
 ---
 
-## 11. Fixing a server's details later
+## 11. When a patch isn't available — mitigations
+
+Sometimes the proper fix — a vendor patch — doesn't exist yet, or can't be
+installed (for example the operating system is **End of Life**, so no update is
+coming). For many well-known flaws there's still an official **mitigation**: a
+documented workaround that closes the hole without the patch — turning off a
+vulnerable feature, blacklisting a risky kernel module, disabling an unneeded
+service, tightening a config, or adding a firewall rule.
+
+AI Defense can apply these too, but only ones from a **cited, reviewed
+catalogue** — never an invented fix. Each mitigation names the official advisory
+it comes from, and is **reversible** and **temporary by intent** (a stopgap until
+you can patch properly or upgrade the OS).
+
+| Say this | What happens |
+|----------|--------------|
+| "What mitigations can you apply?" | Lists each available workaround, the flaw it covers, and the advisory it cites. (Read-only.) |
+| "Mitigate CVE-2021-4034 on web-01." | Proposes the cited workaround and **waits for your approval**; does a practice run first and records how to undo it. |
+| "Revert the mitigation for CVE-2021-4034 on web-01." | Undoes it — once you've patched properly, or if you change your mind. Its own approved change. |
+
+If there's **no** catalogued mitigation for a flaw, AI Defense escalates it to you
+for a decision rather than guessing — often the real answer is an OS upgrade.
+
+> **Advanced:** you can add your own mitigation definitions by pointing the
+> `--mitigations-dir` option ([Step 4](#7-step-4--connect-it-to-claude)) at a
+> folder of small YAML/JSON files. A file maps a flaw to an action that is
+> **already reviewed in the code** — it can match a CVE to an existing action but
+> can never introduce a new command. See
+> [`mitigations/README.md`](../mitigations/README.md).
+
+---
+
+## 12. Fixing a server's details later
 
 Servers change — a key gets rotated, a machine is rebuilt with a new address, or
 you onboarded it with the wrong login. You can correct a server's connection
@@ -371,7 +408,7 @@ already be in your key folder (Step 3).
 
 ---
 
-## 12. Understanding the reports
+## 13. Understanding the reports
 
 Asking for a report writes **four files** into a local folder (nothing is ever
 uploaded — a list of your weak spots is exactly what shouldn't leave your
@@ -389,7 +426,7 @@ than pretending everything is clean.
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 **"The server failed to start" (in Claude).**
 Almost always the `command` isn't pointing at the `.venv` copy of
@@ -402,7 +439,7 @@ The report now tells you *why* in plain terms. The common ones:
 | Message says… | It means… | Fix |
 |---------------|-----------|-----|
 | *unreachable on the SSH port — check the firewall* | the server didn't answer on port 22 | open port 22 to your machine in the server's firewall (e.g. the cloud "Networking" tab) |
-| *SSH authentication rejected — verify user and key_ref* | wrong login name or key | correct it with [update-asset](#11-fixing-a-servers-details-later) |
+| *SSH authentication rejected — verify user and key_ref* | wrong login name or key | correct it with [update-asset](#12-fixing-a-servers-details-later) |
 | *host key changed (likely rebuilt) — clear the stale known_hosts entry* | the server was rebuilt and now looks "different" | remove its old line from your `known_hosts` file (your terminal's `ssh-keygen -R <address>` does this), then scan again |
 
 **A server is *supposed* to be unreachable over SSH.**
@@ -430,7 +467,7 @@ problem to read).
 
 ---
 
-## 14. Glossary
+## 15. Glossary
 
 - **Asset** — a server (or cloud account) you've registered.
 - **Onboarding** — registering an asset and attesting you're allowed to manage
@@ -448,18 +485,25 @@ problem to read).
   not just a patch.
 - **Preflight** — a read-only check of whether a server is ready for an OS
   upgrade. It only advises; it never upgrades anything.
+- **Mitigation** — an official, documented *workaround* for a flaw you can't
+  patch yet (e.g. on an End-of-Life OS). AI Defense applies only cited,
+  reviewed ones; each is reversible and meant as a temporary stopgap until the
+  real patch or an OS upgrade.
 - **Audit log** — the tamper-evident history of everything that was proposed,
   approved, and done.
 
 ---
 
-## 15. Where to find more detail
+## 16. Where to find more detail
 
 - **[README.md](../README.md)** — a feature overview and quick start.
 - **[docs/connect-claude.md](./connect-claude.md)** — the full, detailed guide to
   connecting Claude (every option, cloud/AWS mode, bulk onboarding).
+- **[mitigations/README.md](../mitigations/README.md)** — how to add your own
+  cited mitigation workarounds.
 - **[CLAUDE.md](../CLAUDE.md)** — the complete architecture and security model,
   for the technically curious.
+- **Source:** [github.com/clintcan/ai-defense](https://github.com/clintcan/ai-defense).
 
 You can also simply **ask Claude** how to do something once it's connected —
 "how do I onboard a server?" — and it will walk you through it.

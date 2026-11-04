@@ -10,6 +10,8 @@ the base interface but intentionally not implemented in this read-only slice.
 
 from __future__ import annotations
 
+import secrets
+from datetime import UTC, datetime
 from typing import Any
 
 from .aws_client import AwsClient
@@ -145,7 +147,11 @@ class AwsAdapter(CloudAdapter):
         }
 
     def _snapshot_lightsail(self, instance_name: str, reason: str) -> dict:
-        snapshot_name = f"ai-defense-{instance_name}-prechange"
+        # Lightsail snapshot names must be unique per account/region; a fixed
+        # name collides (InvalidInputException) on a retry while the prior
+        # snapshot from an earlier attempt still exists.
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        snapshot_name = f"ai-defense-{instance_name}-prechange-{stamp}-{secrets.token_hex(3)}"
         self._client.create_lightsail_snapshot(instance_name, snapshot_name)
         return {
             "service": "lightsail", "instance_id": instance_name,

@@ -206,7 +206,15 @@ def test_snapshot_lightsail_uses_its_own_api():
     adapter = AwsAdapter(FakeAwsClient())
     rec = adapter.snapshot_before_change("ls-blog-1", service="lightsail")
     assert rec["service"] == "lightsail"
-    assert rec["snapshot_ids"] == ["ai-defense-ls-blog-1-prechange"]
+    assert len(rec["snapshot_ids"]) == 1
+    assert rec["snapshot_ids"][0].startswith("ai-defense-ls-blog-1-prechange-")
+
+
+def test_snapshot_lightsail_name_is_unique_across_retries():
+    adapter = AwsAdapter(FakeAwsClient())
+    first = adapter.snapshot_before_change("ls-blog-1", service="lightsail")
+    second = adapter.snapshot_before_change("ls-blog-1", service="lightsail")
+    assert first["snapshot_ids"][0] != second["snapshot_ids"][0]
 
 
 def test_snapshot_unsupported_service_raises():

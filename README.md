@@ -3,6 +3,9 @@
 Defensive orchestration & remediation harness. See [`CLAUDE.md`](./CLAUDE.md)
 for the full architecture and security model.
 
+> **New here?** For a step-by-step, non-technical setup guide, start with the
+> **[User Manual](docs/user-manual.md)**.
+
 **Governing rule:** the LLM is a *planner*, never an *actor*. It proposes typed
 intents; the non-LLM **toolset** layer validates against policy, resolves
 secrets from the vault at execution time, and executes. Credentials never reach
